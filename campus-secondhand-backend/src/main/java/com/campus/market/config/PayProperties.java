@@ -231,13 +231,23 @@ public class PayProperties {
      * 支付宝接受 {@code 15d} 这样的值，但对超大分钟数的解析没有明确保证，
      * 用它自己文档里的示例单位最稳。
      */
+    /**
+     * 支付时限的**分钟口径**（与 {@link #timeoutExpress()} 同一来源，避免两处各解析一遍）。
+     * <p>
+     * 之所以单独暴露：渠道侧有**环境上限**要判断（沙箱 15 小时），
+     * 若渠道自己去解析 {@code "1d"} 这种字面量，就成了「一个概念两个解析器」。
+     */
+    public int timeoutExpressMinutes() {
+        return orderTimeoutMinutes > 0 ? orderTimeoutMinutes : 1440;
+    }
+
     public String timeoutExpress() {
         /*
          * ≤0 一律退回默认 1440（24 小时），而不是取 1 分钟。
          * 「支付时限」这个概念里 0 不代表"不限" —— 它代表订单一下单就过期。
          * 配置写错一个 0 就让全站订单秒过期，比默认值宽松一点危险得多。
          */
-        int m = orderTimeoutMinutes > 0 ? orderTimeoutMinutes : 1440;
+        int m = timeoutExpressMinutes();
         if (m >= 1440 && m % 1440 == 0) {
             return (m / 1440) + "d";
         }

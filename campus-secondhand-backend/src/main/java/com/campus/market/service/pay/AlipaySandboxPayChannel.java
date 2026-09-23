@@ -80,6 +80,27 @@ public class AlipaySandboxPayChannel implements PayChannel {
     /** 支付宝业务成功码 */
     private static final String ALIPAY_SUCCESS = "10000";
 
+    /**
+     * 沙箱环境的 {@code timeout_express} 上限：**15 小时**（2026-09-23 真机实证）。
+     * <p>
+     * ★ 这条约束只写在官方帮助文档的「注意事项」里，不在接口参数表里 ★
+     * 传 {@code 1d}（24 小时）时收银台直接报
+     * {@code INVALID_PARAMETER「订单信息无法识别」}——签名没错、金额没错，只有超时越界。
+     * 参数对照实验（.workbuddy/tmp/probe-pagepay-variants.mjs）：
+     * ① 1d → 红 ② 不传 → 绿 ③ 14h → 绿 ④ 1d 去掉 notify_url → 红（证明与 notify_url 无关）。
+     * <p>
+     * 为什么钳到 14h 而不是 15h：留 1 小时余量，避免「边界值恰好等于上限」被拒。
+     * <p>
+     * ★ 钳制的语义代价（如实记）：钳制后支付宝侧比我们本地 {@code pay_expire_at} 更早关单，
+     * 用户可能点开收银台发现「交易已关闭」。方向是**安全的**——反方向（支付宝比本地晚）
+     * 才是「钱收了但订单已作废」。演示环境建议同时把
+     * {@code app.pay.order-timeout-minutes} 设成 840，让两侧完全一致。
+     */
+    private static final int SANDBOX_MAX_TIMEOUT_MINUTES = 14 * 60;
+
+    /** 触发钳制时给支付宝的值（沙箱上限内的最大整小时单位） */
+    private static final String SANDBOX_TIMEOUT_CLAMPED = "14h";
+
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final PayProperties props;
@@ -128,6 +149,24 @@ public class AlipaySandboxPayChannel implements PayChannel {
                 && configured(props.notifyUrl(CODE));
     }
 
+    /**
+     * 传给支付宝的超时参数，按沙箱上限做**钳制**。
+     * <p>
+     * 正常配置（≤14h）原样透传；一旦配得比沙箱上限大，钳到 {@value #SANDBOX_TIMEOUT_CLAMPED}
+     * 并打 WARN —— 让「配置越界」从「收银台报错、链路硬断」降级为「可用但两侧时限不一致」，
+     * 且日志里看得见。见 {@link #SANDBOX_MAX_TIMEOUT_MINUTES}。
+     */
+    String sandboxTimeout() {
+        int minutes = props.timeoutExpressMinutes();
+        if (minutes > SANDBOX_MAX_TIMEOUT_MINUTES) {
+            log.warn("[pay] 沙箱 timeout_express 上限 15h，配置的 {} 分钟越界 ⇒ 钳制为 {}；"
+                            + "建议把 app.pay.order-timeout-minutes 设为 {} 让两侧一致",
+                    minutes, SANDBOX_TIMEOUT_CLAMPED, SANDBOX_MAX_TIMEOUT_MINUTES);
+            return SANDBOX_TIMEOUT_CLAMPED;
+        }
+        return props.timeoutExpress();
+    }
+
     /* ==================================================================
      * 发起支付
      * ================================================================== */
@@ -152,7 +191,7 @@ public class AlipaySandboxPayChannel implements PayChannel {
          * 不传的话支付宝默认 15 天，于是我们 24 小时关单、用户第 3 天还能在支付宝付款，
          * 结果只能走「已收款但订单作废 → 自动退回」。见 PayProperties#timeoutExpress。
          */
-        biz.put("timeout_express", props.timeoutExpress());
+        biz.put("timeout_express", sandboxTimeout());
 
         Map<String, String> params = commonParams(METHOD_PAGE_PAY);
         // ★ 渠道名是路径的最后一段，不是参数：少了它渠道就回调到一个不存在的地址
