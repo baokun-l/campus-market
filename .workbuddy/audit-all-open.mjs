@@ -186,7 +186,8 @@ add('BYDESIGN', 'dist-ignore', '`.gitignore` 含 `dist/`（发版产物）', tru
 // D-SEED（favorite_count）已于 2026-09-23 用真实计数落地（账本三十），不再是待决策项。
 add('DECIDE', 'D-ALIPAY', '是否真去申请支付宝沙箱密钥', false, '不配则只跑 wallet/demo 渠道');
 add('DECIDE', 'D9', '前端 token 存 localStorage（改 httpOnly Cookie 属架构级）', false, '§8.4 已核当前无 XSS 面');
-add('DECIDE', 'D-GIT', '仓库仍未 `git init`', false, '产物只能记源码指纹，无法反查历史');
+// D-GIT 已于 2026-09-23 销项（账本三十二）：main 分支首提 a507fba，543 文件入库。
+add('VERIFY', 'D-GIT', '仓库已 git init（main · a507fba）', has(ROOT, '.git'), '.git=true')
 
 /* ============ 输出 ============ */
 const groups = [
