@@ -15,7 +15,7 @@
 - ✅ 已修 17 批（B0…B9D；B9C = favorite_count 真实计数·三十，B9D = D11 待审核死状态整体拆除·三十一）
 - 📊 基线：后端 **487/487** · 前端 **723/723** + `vue-tsc` 0 错 · 部署缺口审计 **27/27 全通过** · 判据红绿 **31/31** · probe-p111 **26 用例/9 轮**（B8 cookie 用例已回灌；P1-11 阈值 ≥5）
 - 🏭 仓库：**git 已建**（main · a507fba 首提 543 文件，根 .gitignore 排除 .workbuddy bak/tmp/log）；⏭️ 候选：真机全流程回归（`dist/` + jar 跑主链路）· 配远端
-- 🔴 待决策：**支付宝沙箱密钥是否真去申请**（favorite_count 已落地 B9C；D11 已拆链 B9D：用户只剩 active/banned 两态，勿再引入用户 pending）
+- 🔴 待决策：**支付宝沙箱密钥是否真去申请**（favorite_count 已落地 B9C；D11 已拆链 B9D：用户只剩 active/banned 两态，勿再引入用户 pending；D9 已于 B8 关闭——真实凭据在 HttpOnly Cookie，前端 localStorage 只准存 sessionHint，勿回流）
 - ⚪ 别再当待办：**M8（错误一律 200）是契约** · 「退出不清购物车」误判 · P1-11/P2-3/D9 已关
 
 ## 二、验证纪律（★ 最易放松 → N）
