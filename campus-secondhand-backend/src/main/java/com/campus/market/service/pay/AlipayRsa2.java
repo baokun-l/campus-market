@@ -58,14 +58,19 @@ public final class AlipayRsa2 {
      * ================================================================== */
 
     /**
-     * 构造待签名字符串：按 key 升序，跳过空值，跳过 {@code sign} / {@code sign_type}。
+     * 构造**请求**待签名字符串：按 key 升序，跳过空值，**只跳过 {@code sign}**。
      * <p>
-     * ★ 用 {@link TreeMap} 而不是「先取出来再 sort」★
-     * 排序口径必须与支付宝服务端逐字一致。用自然序（{@code String.compareTo}）排序 ——
-     * ASCII 升序，不是「按长度」也不是「按插入顺序」。
+     * ★★ {@code sign_type} 参与**请求**签名 —— 2026-09-23 沙箱真机实测口径 ★★
+     * 第一版把 {@code sign_type} 也一并跳过了，结果 page.pay 收银台直接报
+     * {@code isv.invalid-signature}；网关报错里回显的验签串明确含 {@code sign_type=RSA2}。
+     * 用独立探针双实验证实：剔除 sign_type → 40002 拒签；保留 → 通过（返回业务错误 40004）。
+     * 文档里找不到这条规则差异，只有真机能给出答案 —— 本注释即证据存档。
      * <p>
-     * 之所以把 {@code sign} / {@code sign_type} 也一并跳过，而不是只在验签时跳：
-     * 签名与验签共用同一个方法，两边口径不可能分叉。
+     * ★ 为什么通知验签不走这里 ★：支付宝对**异步通知**的签名口径不同
+     * （官方 SDK rsaCheckV1 剔除 sign 与 sign_type 两个），那条路在 {@link #verifyNotify}。
+     * 第一版两处共用同一个 canonical，请求侧的错误掩盖了通知侧的口径差异，真机一跑才现形。
+     *
+     * <p>排序用 {@link TreeMap}：口径必须与支付宝服务端逐字一致，ASCII 自然升序。
      */
     public static String canonical(Map<String, String> params) {
         TreeMap<String, String> sorted = new TreeMap<>();
@@ -75,7 +80,7 @@ public final class AlipayRsa2 {
             if (k == null || k.isEmpty() || v == null || v.isEmpty()) {
                 continue;
             }
-            if ("sign".equals(k) || "sign_type".equals(k)) {
+            if ("sign".equals(k)) {
                 continue;
             }
             sorted.put(k, v);
@@ -138,9 +143,17 @@ public final class AlipayRsa2 {
         }
     }
 
-    /** 验签 + 取规范串的组合入口（渠道实现用这个，避免自己拼装拼错） */
+    /**
+     * **异步通知**验签：规范串剔除 {@code sign} 与 {@code sign_type} 两个（官方 rsaCheckV1 口径）。
+     * <p>
+     * ★ 口径与请求签名（{@link #canonical}）**不同**：支付宝对通知的签名规则与对请求的
+     * 签名规则不一致 —— 这是官方 SDK 里两个方法、两种剔除口径，不是我们能省的。
+     * 若真实回调验签失败，日志 WARN 会带 out_trade_no，配合支付宝的重推机制可观测。
+     */
     public static boolean verifyNotify(Map<String, String> params, String alipayPublicKey) {
-        return verify(canonical(params), params.get("sign"), alipayPublicKey);
+        java.util.Map<String, String> content = new java.util.LinkedHashMap<>(params);
+        content.remove("sign_type");
+        return verify(canonical(content), params.get("sign"), alipayPublicKey);
     }
 
     /* ==================================================================

@@ -72,13 +72,24 @@ class AlipaySandboxNotifyTest {
         channel = new AlipaySandboxPayChannel(props);
     }
 
-    /** 构造一条「支付宝发来」的通知：用支付宝的私钥按规范串签名 */
+    /**
+     * 按真实支付宝的**通知签名**规则签名：规范串剔除 sign 与 sign_type（rsaCheckV1 口径）。
+     * ★ 与请求签名（canonical，保留 sign_type）口径不同 —— 2026-09-23 真机修复时拆开的。
+     */
+    private static String signAsAlipay(Map<String, String> params, String privateKeyPem) {
+        Map<String, String> content = new LinkedHashMap<>(params);
+        content.remove("sign");
+        content.remove("sign_type");
+        return AlipayRsa2.sign(AlipayRsa2.canonical(content), privateKeyPem);
+    }
+
+    /** 构造一条「支付宝发来」的通知：按支付宝通知签名规则签名 */
     private Map<String, String> signedNotify(Map<String, String> fields) {
         Map<String, String> p = new LinkedHashMap<>(fields);
         p.put("app_id", APP_ID);
         p.put("charset", "utf-8");
         p.put("sign_type", "RSA2");
-        p.put("sign", AlipayRsa2.sign(AlipayRsa2.canonical(p), alipayPrivateKey));
+        p.put("sign", signAsAlipay(p, alipayPrivateKey));
         return p;
     }
 
@@ -152,7 +163,7 @@ class AlipaySandboxNotifyTest {
         notify.put("app_id", "2021003188888888");
         // 注意：这条报文的签名是重新算过的 —— 它确实是一份「合法的支付宝报文」，
         // 只是属于另一个商户。只有 app_id 比对能拦住它。
-        notify.put("sign", AlipayRsa2.sign(AlipayRsa2.canonical(notify), alipayPrivateKey));
+        notify.put("sign", signAsAlipay(notify, alipayPrivateKey));
         assertFalse(channel.parseNotify(notify).ok());
     }
 
@@ -163,7 +174,7 @@ class AlipaySandboxNotifyTest {
         gen.initialize(2048);
         KeyPair attacker = gen.generateKeyPair();
         Map<String, String> notify = signedNotify(paidFields());
-        notify.put("sign", AlipayRsa2.sign(AlipayRsa2.canonical(notify),
+        notify.put("sign", signAsAlipay(notify,
                 "-----BEGIN PRIVATE KEY-----\n"
                         + Base64.getEncoder().encodeToString(attacker.getPrivate().getEncoded())
                         + "\n-----END PRIVATE KEY-----"));

@@ -84,14 +84,16 @@ class AlipayRsa2Test {
         }
 
         @Test
-        @DisplayName("★ 跳过 sign 与 sign_type —— 它们本身不参与签名")
-        void skipsSignAndSignType() {
+        @DisplayName("★★ 跳过 sign；sign_type 参与签名 —— 2026-09-23 沙箱真机实测口径")
+        void skipsSignButKeepsSignType() {
             Map<String, String> p = new LinkedHashMap<>();
             p.put("a", "1");
             p.put("sign", "xxx");
             p.put("sign_type", "RSA2");
             p.put("b", "2");
-            assertEquals("a=1&b=2", AlipayRsa2.canonical(p));
+            // 真机证据：剔除 sign_type ⇒ 网关 isv.invalid-signature（其回显串含 sign_type=RSA2）；
+            // 保留 ⇒ 通过。旧版断言「sign_type 不参与」是把请求签名与通知验签的口径搞混了。
+            assertEquals("a=1&b=2&sign_type=RSA2", AlipayRsa2.canonical(p));
         }
 
         @Test
