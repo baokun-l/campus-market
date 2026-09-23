@@ -1,0 +1,167 @@
+# ====================================================================
+# 生产环境配置（profile = prod）
+# ====================================================================
+# 激活方式（**参数写死在 systemd unit / 启动脚本里，不允许外部传**）：
+#   java -Duser.timezone=Asia/Shanghai -jar app.jar --spring.profiles.active=prod
+#
+# ★ 本文件的三条硬规矩 ★
+#   1. **不含任何凭据** —— 口令、密钥一律 ${ENV} 从环境变量取，
+#      验收方式：grep -i "password\|secret" application-prod.yml 应只剩变量名。
+#   2. **该失败的地方不许有默认值** —— DB_URL / DB_USERNAME / JWT_SECRET 都没有冒号后缀，
+#      缺了就是启动失败，而不是"悄悄起在一个错的库上"。
+#   3. **生产该收紧的默认在这里收** —— 日志、接口文档、连接池、上传目录、CORS。
+#      这些在 application.yml 里为了"本地零配置"刻意放宽，prod 必须收回来。
+#
+# ★ 首次部署的建表顺序（重要）★
+#   本文件把 spring.sql.init.mode 设为 never —— 结构变更不该是"启动的副作用"。
+#   所以第一次上线要**手工执行一次**建表（用 db/schema.sql，它是 DROP+CREATE 的重建型脚本，
+#   只适合空库），**不要**灌 db/seed-base.sql：里面的 admin/admin123 是仓库里公开的弱口令
+#   （见「服务器部署适配清单.md」P1-8）。管理员账号手工创建。
+#   想让应用自己建表：SQL_INIT_MODE=always 临时起一次，建完改回默认。
+# ====================================================================
+
+server:
+  # ---- ① 只监听回环地址 ----
+  # 生产环境必须经 Nginx 反代进来：TLS 终止、限流、访问控制都做在 Nginx 上。
+  # 若这里监听 0.0.0.0，攻击者可以直接绕开 Nginx 访问 :8080，
+  # Nginx 上所有防护（含 HTTPS 强制跳转）全部失效。
+  # ★ 容器部署时改成 SERVER_ADDRESS=0.0.0.0（容器网络本身就是一层隔离），
+  #   但仍要确保宿主机不把 8080 直接暴露到公网。
+  address: ${SERVER_ADDRESS:127.0.0.1}
+
+  # ---- ② 反向代理头 ----
+  # 不配的话 Spring 认为自己是 HTTP、客户端 IP 是 Nginx 的 IP。
+  # 当前代码没依赖真实 IP，但**一旦加了访问日志或限流，就会把所有人记成同一个 IP**，
+  # 表现为"限流把所有人一起限了"。现在配是零成本，事后补要重新过一遍日志口径。
+  # Nginx 侧必须配套传：X-Forwarded-For / X-Forwarded-Proto / Host
+  forward-headers-strategy: framework
+
+  tomcat:
+    # 与下面的 maximum-pool-size 配套：200 个线程抢 10 个连接，
+    # 结果不是"更能扛并发"，而是把"快速拒绝"变成"大量等连接直到超时"，体验更差。
+    # 参考「服务器部署适配清单.md」P1-12。
+    max-threads: ${TOMCAT_MAX_THREADS:50}
+
+spring:
+  # ---- 数据源：三个必填项一律无默认值 ----
+  datasource:
+    # 生产 URL 与开发 URL 的差别（详见「服务器部署适配清单.md」P1-1）：
+    #   · 去掉 createDatabaseIfNotExist=true —— 它要求应用账号有 CREATE 权限，
+    #     而生产账号只该有 CRUD；
+    #   · 不用 useSSL=false —— 否则应用到 DB 的流量（含库口令、用户手机号）明文过网；
+    #   · sslMode 默认 REQUIRED；若 MySQL 未开 TLS 又与应用同机，
+    #     显式设 DB_SSL_MODE=PREFERRED 或 DISABLED（回环地址不过网，可接受）。
+    # 例：DB_URL=jdbc:mysql://db-host:3306/campus_market?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&sslMode=REQUIRED
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:5}
+      # ★★ 时区对齐的另一半 ★★
+      # 「在线」功能写入用 LocalDateTime.now()（JVM 时区），读取用 NOW()（MySQL 会话时区），
+      # 两侧不一致就会**全站永久离线且无任何报错**。
+      # 这里在每条新连接上把 MySQL 会话时区设为与 JVM 相同的偏移，
+      # JVM 侧由 DeploymentGuard 设置（同样是 APP_TIME_ZONE_OFFSET 这一个开关）——
+      # 只有一个开关，就不存在"改了一边忘了另一边"。
+      # 用 +08:00 这种**固定偏移**而不是 Asia/Shanghai：
+      # 后者要求 mysql.time_zone_name 表有数据，官方 mysql 镜像默认没有 → 直接报
+      # "Unknown or incorrect time zone"。
+      #
+      # ★ 占位符必须写 app.time-zone-offset（点分小写），不能写 APP_TIME_ZONE_OFFSET ★
+      # 环境变量形式由 SystemEnvironmentPropertySource 做点→下划线的宽松匹配，两种写法都认；
+      # 但**命令行参数不做宽松绑定** —— 写 ${APP_TIME_ZONE_OFFSET:...} 时，
+      # `--app.time-zone-offset=+09:00` 这种写法会被忽略，于是 JVM 侧（护栏读点分名）
+      # 与 MySQL 侧（占位符读下划线名）各拿各的值，时区对齐被悄悄拆成两个开关。
+      # 统一写成点分名后，环境变量 / 命令行 / systemd EnvironmentFile 三种来源都只认这一个键。
+      connection-init-sql: SET time_zone = '${app.time-zone-offset:+08:00}'
+
+  # ---- 上传大小三层口径统一 ----
+  # 应用层 app.upload.max-image-bytes 是 2MB，这里也收到 2MB：
+  # 否则用户传 3MB 的图，先被 multipart 放行、再被应用层拒，
+  # 报错文案与真实原因对不上（「服务器部署适配清单.md」P2-4）。
+  servlet:
+    multipart:
+      max-file-size: 2MB
+      max-request-size: 4MB
+
+  # ---- 启动期不再执行 SQL 脚本 ----
+  # schema-auto.sql 是 CREATE TABLE IF NOT EXISTS，本身幂等安全，所以这不是紧急缺陷；
+  # 但它需要 DDL 权限（与"应用账号只给 CRUD"矛盾），且**只建表不补列** ——
+  # 老库加列必须靠手工增量脚本，容易在部署时被遗忘。
+  # 结构变更应该是"一次受控的操作"，不是"每次启动的副作用"（P1-9）。
+  sql:
+    init:
+      mode: ${SQL_INIT_MODE:never}
+
+# ---- 接口文档：生产默认关闭 ----
+# 这里只是"默认"，真正的**强制**在 DeploymentGuard —— 它会把这两项插到属性源最前面，
+# 连 SPRINGDOC_* 环境变量都覆盖不了（防止把开发环境的环境文件整份复制过来）。
+springdoc:
+  api-docs:
+    enabled: ${SPRINGDOC_API_DOCS_ENABLED:false}
+  swagger-ui:
+    enabled: ${SPRINGDOC_SWAGGER_UI_ENABLED:false}
+
+# ---- JWT：无默认值，缺失即启动失败 ----
+# 兜底密钥写在开源仓库里 = 公开；任何人拿它就能自签 role=admin 的 token 进后台。
+# 生成：export JWT_SECRET=$(openssl rand -base64 48)
+jwt:
+  secret: ${JWT_SECRET}
+
+app:
+  # ---- 多实例必配（0..9）----
+  # 订单号与活动号末段含实例号，**两个实例配成同一个值就会撞号**；越界会直接抛错
+  # （InstanceSeqGenerator 有意不"静默夹紧"）。单实例保持默认 0。
+  # 详见「后端设计说明.md」附二十一。
+  instance-id: ${APP_INSTANCE_ID:0}
+
+  # ---- 日志目录：同样必须移出源码树 ----
+  # 默认 /data/campus/logs，与上传目录同级放在独立数据盘上。
+  # 滚动策略（按天 + 100MB 切分 + 保留 30 天 + 总量 2GB 上限 + ERROR 单独一份）
+  # 在 src/main/resources/logback-spring.xml 里，不在本文件。
+  # ★ 别在这里配 logging.file.path ★：那会与 logback-spring.xml 里的 <file> 打架，
+  #   两个地方同时决定落点，等于两个开关（谁生效取决于加载顺序）。
+  log-dir: ${LOG_DIR:/data/campus/logs}
+
+  upload:
+    # ★ 目录必须移出源码树 ★
+    # 默认 uploads 相对路径会落在"后端进程的工作目录"里 —— 那是会被下一次部署覆盖掉的目录，
+    # 而用户上传的图是**不可再生的业务数据**。生产指到独立数据盘。
+    dir: ${UPLOAD_DIR:/data/campus/uploads}
+
+  # ---- AI 助手闸门（长度上限 + 调用频次）----
+  # ★ 生产这里刻意**不再重复声明** app.ai-guard.* ★
+  # 那一组默认值在 application.yml 里只有一处定义；两边各写一份 = 同一个概念两个开关，
+  # 日后只改其中一处就会出现「配置文件里明明调过、实际没生效」（本仓踩过的形态）。
+  # 生产要调，用环境变量覆盖即可，变量名已在 application.yml 的占位符里写明：
+  #   AI_GUARD_USER_MAX_CALLS / AI_GUARD_GLOBAL_MAX_CALLS / AI_GUARD_WINDOW_SECONDS /
+  #   AI_GUARD_MAX_TITLE_LENGTH / AI_GUARD_MAX_KEYWORDS_LENGTH / AI_GUARD_MAX_MESSAGE_LENGTH
+  # 上线前建议把 global-max-calls 按「可接受的月账单」反推一个数 ——
+  # 它是唯一能兜住 AI 费用的那条网（详见 AiQuotaGuard 类注释）。
+
+  # ---- 图片上传闸门（P1-10）----
+  # 同理：app.upload-guard.* 也**不在这里重复声明**，默认值只在 application.yml 一处。
+  # 生产要调，用环境变量覆盖（变量名见 application.yml 的占位符）：
+  #   UPLOAD_GUARD_USER_MAX_UPLOADS / UPLOAD_GUARD_GLOBAL_MAX_UPLOADS / UPLOAD_GUARD_WINDOW_SECONDS
+  # 上线前建议按「磁盘能承受多少张/分钟」反推 global-max-uploads ——
+  # 它是唯一能兜住上传目录膨胀的那条网（详见 UploadQuotaGuard 类注释）。
+
+# ---- 跨域：生产默认不放行任何来源 ----
+# 前端 .env.production 用的是 VITE_API_BASE=/api（相对路径），走同域反代，
+# 浏览器根本不发起跨域请求，所以留空是**安全且正确**的。
+# 若前端改放独立域名/CDN，必须显式给 CORS_ALLOWED_ORIGINS=https://your-domain.com，
+# 否则所有跨域请求会被拒（403 Invalid CORS request），
+# 而排查方向很容易被误导成 Nginx 或 token 问题。
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+
+# ---- 日志 ----
+# ★ mapper 从 debug 降为 info ★
+# debug 会把真实 SQL 连同参数打出来，而本项目 SQL 参数里含**手机号、收货地址**。
+# 日志一旦落盘，文件里就是一批明文的个人敏感信息（P0-9）。
+logging:
+  level:
+    com.campus.market: info
+    com.campus.market.mapper: info
+    org.springframework.web: info

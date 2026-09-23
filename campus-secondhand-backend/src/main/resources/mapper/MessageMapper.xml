@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.campus.market.mapper.MessageMapper">
+
+    <!--
+      显式 resultMap：实体字段是 `read`，列名是 `is_read`，
+      依赖 map-underscore-to-camel-case 只会得到 isRead，映射不上。
+    -->
+    <resultMap id="messageMap" type="com.campus.market.entity.Message">
+        <id property="id" column="id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="fromUserId" column="from_user_id"/>
+        <result property="toUserId" column="to_user_id"/>
+        <result property="content" column="content"/>
+        <result property="read" column="is_read"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <!--
+      会话列表：每个会话取最后一条消息，输出结构直接对齐前端 `ChatSession`。
+        id / peerId / peerName / peerAvatar / goodsId / goodsTitle / goodsCover
+        / lastMessage / lastTime / unread
+
+      goodsId 从会话 id 里反解：会话 id 规则为 s_{goodsId}_{minUserId}_{maxUserId}，
+      SUBSTRING_INDEX(id,'_',2) 得到 's_9000'，再取最后一段即 9000。
+      goodsId 为 0（如平台警告会话）时 LEFT JOIN 落空，三个商品字段为 null。
+    -->
+    <select id="selectSessions" resultType="map">
+        SELECT
+            m.session_id AS id,
+            CASE WHEN m.from_user_id = #{userId} THEN m.to_user_id ELSE m.from_user_id END AS peerId,
+            u.nickname AS peerName,
+            u.avatar   AS peerAvatar,
+            g.id       AS goodsId,
+            g.title    AS goodsTitle,
+            g.cover    AS goodsCover,
+            m.content  AS lastMessage,
+            m.create_time AS lastTime,
+            (SELECT COUNT(*) FROM t_message x
+             WHERE x.session_id = m.session_id
+               AND x.to_user_id = #{userId}
+               AND x.is_read = 0) AS unread
+        FROM t_message m
+        INNER JOIN t_user u
+            ON u.id = CASE WHEN m.from_user_id = #{userId} THEN m.to_user_id ELSE m.from_user_id END
+        LEFT JOIN t_goods g
+            ON g.id = CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(m.session_id, '_', 2), '_', -1) AS UNSIGNED)
+        WHERE m.id IN (
+            SELECT MAX(id) FROM t_message
+            WHERE from_user_id = #{userId} OR to_user_id = #{userId}
+            GROUP BY session_id
+        )
+        ORDER BY m.create_time DESC
+    </select>
+
+    <!--
+      某会话的全部消息。
+      ★ 必须带归属条件 ★：会话 id（s_{goodsId}_{minUserId}_{maxUserId}）只由
+      「商品 + 双方 id」推导，是可被猜到的（商品 id 与用户 id 都是小整数），
+      所以只按 session_id 查等于任何人都能读任何人的私信 —— 换个 id 就能看别人的聊天记录。
+      markRead / deleteSession 都带了 userId 条件，唯独读消息这条漏了，补齐即可：
+      只有「我发出」或「发给我」的消息才返回。
+
+      副作用（可接受）：通过 openSession 新建、双方尚未发言的空会话返回空数组 ——
+      前端本来也是先有消息才有内容，不会因此报错。
+    -->
+    <select id="selectBySession" resultMap="messageMap">
+        SELECT * FROM t_message
+        WHERE session_id = #{sessionId}
+          AND (from_user_id = #{userId} OR to_user_id = #{userId})
+        ORDER BY create_time ASC
+    </select>
+
+    <select id="countUnread" resultType="int">
+        SELECT COUNT(*) FROM t_message WHERE to_user_id = #{userId} AND is_read = 0
+    </select>
+
+    <update id="markRead">
+        UPDATE t_message SET is_read = 1
+        WHERE session_id = #{sessionId} AND to_user_id = #{userId} AND is_read = 0
+    </update>
+
+</mapper>

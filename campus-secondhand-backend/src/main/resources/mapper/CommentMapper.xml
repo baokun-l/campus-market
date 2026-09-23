@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.campus.market.mapper.CommentMapper">
+
+    <select id="selectByGoods" resultType="com.campus.market.entity.Comment">
+        SELECT * FROM t_comment WHERE goods_id = #{goodsId} ORDER BY create_time ASC
+    </select>
+
+    <select id="selectAdminComments" resultType="map">
+        SELECT c.*, g.title AS goodsTitle,
+               (CASE WHEN c.parent_id IS NOT NULL THEN 1 ELSE 0 END) AS isReply
+        FROM t_comment c
+        LEFT JOIN t_goods g ON g.id = c.goods_id
+        WHERE 1=1
+        <if test="goodsId != null">
+            AND c.goods_id = #{goodsId}
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND (c.content LIKE CONCAT('%', #{keyword}, '%')
+                 OR c.user_name LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        ORDER BY c.create_time DESC
+    </select>
+
+    <delete id="deleteByParentId">
+        DELETE FROM t_comment WHERE parent_id = #{parentId}
+    </delete>
+
+</mapper>

@@ -1,0 +1,398 @@
+@use './variables.scss' as *;
+
+// ============================================================
+// 01 · Reset & 基础排版
+// ============================================================
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: $font-sans;
+  font-size: $fs-14;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  background-color: var(--bg-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+// 字号大小切换：全站 px 定字号，改根字号无视觉变化，
+// 因此用 body zoom 整体缩放（html[data-font] 由 app store 的 setFontSize 写入）
+// ☠️ 注意：body zoom 会让 EP 弹层（Popper 定位、挂 body 下）坐标双重缩放而错位，
+// 档位越大偏得越远（特大档实测 dx=179px）。凡设置页等常与 zoom 并用的
+// 下拉一律改用非弹层控件（如 el-segmented），见 settings/Index.vue 字号行。
+html[data-font='large'] body { zoom: 1.08; }
+html[data-font='xlarge'] body { zoom: 1.16; }
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-weight: $fw-semibold;
+  color: var(--color-text-primary);
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: $fs-24; }
+h2 { font-size: $fs-20; }
+h3 { font-size: $fs-16; }
+
+p { margin: 0; }
+
+a {
+  color: $color-primary;
+  text-decoration: none;
+  transition: color $dur-base $ease-out;
+  &:hover { color: $color-primary-hover; }
+}
+
+img,
+svg,
+video {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+ul,
+ol { margin: 0; padding: 0; list-style: none; }
+
+// 数字统一等宽，避免价格/统计跳动 —— 参考图里价格字形非常稳
+.tnum,
+.price-wrap .now,
+.stat-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+// ============================================================
+// 02 · 可访问性：键盘焦点环 / 减动效偏好
+// ============================================================
+// 只在键盘导航时出现焦点环（鼠标点击不打扰视觉）
+:where(a, button, input, select, textarea, [tabindex], .el-button, .el-menu-item):focus-visible {
+  outline: 2px solid $color-primary;
+  outline-offset: 2px;
+  border-radius: $radius-sm;
+}
+
+// 键盘可达的可点击自定义元素，保证最小 44×44 命中区域（WCAG 2.5.5）
+.tap-target {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+// ============================================================
+// 03 · 交互反馈系统（对齐参考图的克制风格）
+// ------------------------------------------------------------
+// 参考图的悬停反馈是「轻微上浮 + 阴影加深 + 边框显色」，
+// 不做夸张发光。这里把旧版的三层光晕收敛为两层，
+// 既保留品质感，又不会在密集网格里显得脏。
+//   触发：:hover       时长：280ms（进出对称）
+//   缓动：easeOutExpo  按下：120ms 快速回落
+// ============================================================
+.glow-on-hover {
+  transition:
+    transform $dur-slow $ease-out,
+    box-shadow $dur-slow $ease-out,
+    border-color $dur-slow $ease-out;
+  will-change: transform, box-shadow;
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 0 0 1px rgba(37, 99, 235, 0.28),
+      0 10px 24px -10px rgba(37, 99, 235, 0.42);
+  }
+  &:active {
+    transform: translateY(0);
+    transition-duration: $dur-fast;
+  }
+}
+
+.glow-cover {
+  position: relative;
+  overflow: hidden;
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow: inset 0 0 0 0 rgba(255, 255, 255, 0);
+    transition: box-shadow $dur-slow $ease-out;
+  }
+  &:hover::after {
+    box-shadow: inset 0 0 24px 0 rgba(255, 255, 255, 0.16);
+  }
+}
+
+.btn-glow {
+  transition:
+    transform $dur-base $ease-out,
+    box-shadow $dur-base $ease-out,
+    filter $dur-base $ease-out;
+  will-change: transform, box-shadow;
+  &:hover { transform: translateY(-1px); }
+  &:active {
+    transform: translateY(0);
+    transition-duration: $dur-fast;
+  }
+}
+
+// ============================================================
+// 04 · Element Plus 组件形态统一
+// ------------------------------------------------------------
+// 目标：圆角/描边/阴影/高度一致，消除"各组件各长各的"的割裂感
+// ============================================================
+
+// ---- 按钮 ----
+.el-button {
+  border-radius: $radius-sm;
+  font-weight: $fw-medium;
+  transition:
+    background-color $dur-base $ease-out,
+    border-color $dur-base $ease-out,
+    color $dur-base $ease-out,
+    box-shadow $dur-base $ease-out,
+    transform $dur-base $ease-out !important;
+
+  &:active { transform: translateY(0) scale(0.985); }
+
+  // 小号按钮做药丸，贴合参考图头部的「发布 / 消息」
+  &.el-button--small { border-radius: $radius-pill; padding-left: 16px; padding-right: 16px; }
+}
+
+.el-button--primary {
+  --el-button-bg-color: #{$color-primary};
+  --el-button-border-color: #{$color-primary};
+  --el-button-hover-bg-color: #{$color-primary-hover};
+  --el-button-hover-border-color: #{$color-primary-hover};
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.18);
+  &:hover { box-shadow: $shadow-primary; }
+}
+
+// 橙色主行动按钮（立即购买等）—— 用 .btn-brand 类调用
+.el-button.btn-brand,
+.el-button--brand {
+  --el-button-bg-color: #{$brand-orange};
+  --el-button-border-color: #{$brand-orange};
+  --el-button-hover-bg-color: #{$brand-orange-deep};
+  --el-button-hover-border-color: #{$brand-orange-deep};
+  --el-button-active-bg-color: #{$brand-orange-deep};
+  --el-button-text-color: #fff;
+  background: linear-gradient(135deg, #ff8a1f 0%, #{$brand-orange} 100%);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 2px 6px -1px rgba(255, 106, 0, 0.3);
+  &:hover,
+  &:focus {
+    background: linear-gradient(135deg, #{$brand-orange} 0%, #{$brand-orange-deep} 100%);
+    border-color: transparent;
+    color: #fff;
+    box-shadow: $shadow-brand;
+  }
+}
+
+// 描边按钮（联系卖家）—— 参考图是白底 + 蓝描边 + 蓝字
+.el-button.btn-outline,
+.el-button--outline {
+  background: #fff;
+  border-color: rgba(37, 99, 235, 0.45);
+  color: $color-primary;
+  &:hover,
+  &:focus {
+    background: $color-primary-soft;
+    border-color: $color-primary;
+    color: $color-primary-hover;
+  }
+}
+
+// ---- 输入框 ----
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  border-radius: $radius-sm;
+  box-shadow: 0 0 0 1px var(--border-color-strong) inset;
+  transition: box-shadow $dur-base $ease-out;
+  &:hover { box-shadow: 0 0 0 1px #d6d8dc inset; }
+  &.is-focus,
+  &:focus-within {
+    box-shadow: 0 0 0 1px $color-primary inset, 0 0 0 3px rgba(37, 99, 235, 0.12);
+  }
+}
+
+// ---- 卡片 ----
+.el-card {
+  border-radius: $radius-md;
+  border: 1px solid var(--border-color);
+  box-shadow: $shadow-xs;
+  overflow: hidden;
+  &.is-hover-shadow:hover {
+    box-shadow: $shadow-md;
+    border-color: rgba(37, 99, 235, 0.24);
+  }
+}
+
+// ---- 标签 ----
+.el-tag {
+  border-radius: $radius-xs;
+  font-weight: $fw-medium;
+  border: none;
+}
+
+// ---- 下拉 / 气泡浮层：统一圆角与阴影 ----
+.el-dropdown__popper,
+.el-popper.is-light,
+.el-select__popper,
+.el-popover.el-popper {
+  border-radius: $radius-md !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: $shadow-lg !important;
+}
+
+.el-dropdown-menu__item {
+  border-radius: $radius-xs;
+  margin: 2px 6px;
+  font-size: $fs-13;
+}
+
+// ---- 分页 / 空状态等细节圆角 ----
+.el-pagination.is-background .el-pager li {
+  border-radius: $radius-sm;
+}
+
+// ---- 骨架屏圆角 ----
+.el-skeleton__item { border-radius: $radius-sm; }
+
+// ============================================================
+// 05 · 工具类（保留旧命名，避免既有页面回归）
+// ============================================================
+.flex { display: flex; }
+.flex-1 { flex: 1; }
+.flex-center { display: flex; align-items: center; justify-content: center; }
+.flex-between { display: flex; align-items: center; justify-content: space-between; }
+.flex-col { display: flex; flex-direction: column; }
+.gap-sm { gap: $sp-2; }
+.gap-md { gap: $sp-4; }
+.gap-lg { gap: $sp-6; }
+
+.text-mute { color: var(--color-text-mute); font-size: $fs-13; }
+.text-secondary { color: var(--color-text-secondary); }
+.text-primary-color { color: $color-primary; }
+.text-accent { color: $color-accent; }
+.text-brand { color: $brand-orange; }
+.text-success { color: $color-success; }
+.text-danger { color: $color-danger; }
+.text-warning { color: $color-warning; }
+
+.font-bold { font-weight: $fw-bold; }
+.font-12 { font-size: 12px; }
+.font-13 { font-size: 13px; }
+.font-14 { font-size: 14px; }
+.font-16 { font-size: 16px; }
+.font-18 { font-size: 18px; }
+.font-22 { font-size: 22px; }
+.font-28 { font-size: 28px; }
+
+.mt-4 { margin-top: $sp-1; }
+.mt-8 { margin-top: $sp-2; }
+.mt-12 { margin-top: $sp-3; }
+.mt-16 { margin-top: $sp-4; }
+.mb-4 { margin-bottom: $sp-1; }
+.mb-8 { margin-bottom: $sp-2; }
+.mb-12 { margin-bottom: $sp-3; }
+.mb-16 { margin-bottom: $sp-4; }
+
+// 统一卡片：参考图的白底 + 极浅描边 + 12px 圆角
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  padding: $sp-6;
+  box-shadow: $shadow-xs;
+}
+
+// 区块标题：左侧品牌色短竖条 + 标题 + 右侧更多
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $sp-4;
+  h3 {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: $sp-2;
+    font-size: $fs-16;
+    font-weight: $fw-semibold;
+    &::before {
+      content: '';
+      width: 3px;
+      height: 15px;
+      border-radius: $radius-pill;
+      background: linear-gradient(180deg, $brand-orange, #ffa64d);
+    }
+  }
+}
+
+.divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: $sp-4 0;
+}
+
+// ============================================================
+// 06 · 响应式工具
+// ============================================================
+@media (max-width: $breakpoint-sm) {
+  .hide-xs { display: none !important; }
+}
+@media (max-width: $breakpoint-md) {
+  .hide-sm { display: none !important; }
+}
+
+// ============================================================
+// 07 · nprogress 主题
+// ============================================================
+#nprogress .bar {
+  background: $brand-orange !important;
+  height: 3px !important;
+}
+#nprogress .peg {
+  box-shadow: 0 0 10px $brand-orange, 0 0 5px $brand-orange !important;
+}
+#nprogress .spinner-icon {
+  border-top-color: $brand-orange !important;
+  border-left-color: $brand-orange !important;
+}

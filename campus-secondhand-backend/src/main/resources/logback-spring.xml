@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+====================================================================
+日志落盘配置（部署适配清单 P0-8）
+====================================================================
+★ 为什么必须有这个文件 ★
+  此前全仓没有 logback-spring.xml，Spring Boot 默认**只输出到标准输出**：
+  没有文件、没有滚动、没有保留期。后果：
+    · 进程重启（或 systemd 重启、容器重建）之后，**出事那一刻的日志直接没了** ——
+      而生产排障的第一现场就是日志；
+    · 更糟的是它有"看起来有日志"的假象：`journalctl -u xxx` 平时确实能看到东西，
+      直到事后去查才发现那段已经滚掉或被配额静默截断。
+  ⇒ 所以「日志落在哪、留多久、多大上限」必须在**部署之前**有确定答案。
+
+★ 文件名为什么是 logback-spring.xml 而不是 logback.xml ★
+  只有 `-spring` 后缀的那个才会被 Spring Boot 接管，
+  才能用 <springProperty> 读配置、用 <springProfile> 按环境分支。
+  命名成 logback.xml 时它会被 logback 直接加载 —— 文件在、格式对、就是不生效，
+  且**一个字都不会报错**。这是本项目反复踩到的"配了但没生效"同一类坑。
+
+★ 控制台为什么**不显式设 charset** ★
+  Windows 控制台是 GBK。若这里写死 UTF-8，本机启动日志里的中文会全变乱码，
+  而项目的真机探针是按 GBK 解码控制台输出的（见 后端设计说明 附二十四 坑 3）。
+  不写 charset ⇒ logback 用 JVM 默认编码（本机 GBK、Linux 生产 UTF-8），
+  两边都是"该环境的正确编码"。**落盘文件则固定 UTF-8**，便于 grep 与交接。
+====================================================================
+-->
+<configuration>
+
+    <!--
+        日志目录：读 Spring 配置 app.log-dir，可用环境变量 LOG_DIR 覆盖。
+          · 本地默认 `logs`（落在后端进程工作目录，已被 .gitignore 忽略）
+          · 生产在 application-prod.yml 里默认 /data/campus/logs（★ 源码树之外）
+        ★ 必须与代码/仓库分开放 ★：日志是可随时清理的运行期产物，
+          放进源码树就会跟"覆盖式部署"打架，也容易被误提交。
+    -->
+    <springProperty name="LOG_DIR" source="app.log-dir" defaultValue="logs"/>
+    <property name="APP_NAME" value="campus-market"/>
+
+    <!--
+        控制台：保持与改动前一致的观感 + 一个 traceId 前缀（P1-6）。
+        只带 traceId / uid 两项：开发时是"一眼能看出这两行属于同一次请求"，
+        把 method/uri 也塞进来会让每一行都变长，本地看日志反而更累。
+    -->
+    <property name="CONSOLE_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{traceId:-}] [%thread] %logger{40} - %msg%n"/>
+
+    <!--
+        ★★ 文件：这是排障用的那一份，所以带全上下文（P1-6）★★
+        traceId  —— 同一次请求的所有日志行共用，可把跨类的若干行串起来；
+        uid      —— 哪个用户。没登录/未鉴权的请求显示 anon（而不是留空，
+                    留空会让人误以为"日志坏了"）；`MDC.clear()` 由 RequestTraceFilter 负责。
+        method/uri —— 打到哪个接口。默认值用 `?` 与 anon 区分开：`?` 表示"这次日志
+                    不在某个请求里"（如定时任务的 INFO），不是"请求没有路径"。
+
+        ★ 默认值语法 ★：`%X{key:-default}` 里 `:-` 是分隔符，
+          所以写成 `%X{uid:-anon}` 表示"取不到 uid 时打 anon"。
+          漏掉这个默认值时 logback 会打空串，日志里会出现连续两个空格，肉眼几乎看不出区别
+          —— 「字段看起来在、其实一直为空」正是本项目反复强调要避免的形态。
+
+        ★ traceId 在生产上的完整链路 ★：
+          Nginx（可用 $request_id 透传 X-Request-Id）
+            → RequestTraceFilter（校验/生成 + MDC.put + 回写响应头）
+              → logback pattern（这里）
+                → 用户报障时给出的 X-Request-Id → grep 这一个 id 就能捞出全部相关日志
+    -->
+    <property name="FILE_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{traceId:-}] [uid=%X{uid:-anon}] [%X{method:-?} %X{uri:-?}] [%thread] %logger{40} - %msg%n"/>
+
+    <!-- ============================ 控制台 ============================ -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ========================== 全量日志文件 ========================== -->
+    <!--
+        滚动策略：按天 + 按大小（SizeAndTimeBased）。
+        为什么两个都要：
+          · 只按天 —— 一次异常刷屏可以在几秒内写出几百 MB，把磁盘直接写满，
+            而磁盘满会连带影响**用户上传的图片**（同一个盘）；
+          · 只按大小 —— 排查时"某天的日志"反而不好找，而按天切分是最自然的检索单位。
+        保留期 30 天、总量上限 2GB：两个都是"上限"而不是"目标"，
+        真正压住磁盘的是 totalSizeCap；maxHistory 负责时间维度的清理。
+        cleanHistoryOnStart：进程启动时先做一次清理 —— 长期不重启的服务，
+        否则只能等到下一次滚动才触发清理。
+    -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/${APP_NAME}.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/${APP_NAME}-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${FILE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- ========================== 错误单独一份 ========================== -->
+    <!--
+        ★ 为什么要把 ERROR 拆出来 ★
+        全量日志里,一次启动就有几百行 INFO，"出事时翻日志"实际上是在几百行里捞几行。
+        单独一份 error 文件让「今天有没有报错」变成一次 grep 就能回答的问题 ——
+        这也是接入监控时最省事的抓手（文件行数 / 文件大小突变即可告警）。
+        ★ 只收 ERROR，不收 WARN ★：WARN 里混着大量正常业务提示（如 AI 调用失败回退模板），
+        一旦混进来，这个文件就退化成"第二个全量日志"，拆分也就没意义了。
+      -->
+    <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/${APP_NAME}-error.log</file>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>ERROR</level>
+        </filter>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/${APP_NAME}-error-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>500MB</totalSizeCap>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${FILE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!--
+        ★ 这里刻意**不**写 <logger> 的级别 ★
+        项目里所有级别控制都放在 application*.yml 的 logging.level 下
+        （application-prod.yml 把 com.campus.market.mapper 从 debug 降为 info，
+         避免真实 SQL 连同手机号、收货地址一起落盘）。
+        Spring Boot 会在加载完本文件**之后**再把 logging.level.* 应用到 logback 上下文，
+        所以 yml 里的设置始终生效 —— 在两处都能配级别，等于有两个开关，
+        正是本项目反复强调要避免的形态。**级别只有一个入口：yml。**
+    -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+        <appender-ref ref="ERROR_FILE"/>
+    </root>
+
+</configuration>

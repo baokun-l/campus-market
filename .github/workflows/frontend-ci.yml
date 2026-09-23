@@ -1,0 +1,90 @@
+# ===================================================================
+# 前端 CI —— 每次 push / PR 都跑「依赖安装 + 类型检查 + 单测 + 构建」
+# -------------------------------------------------------------------
+# ★ 前端这边最该被自动守住的三件事（都出过真事故）★
+#
+# 1) **类型检查**。本项目有 `check-ts.mjs` / `check-vue.mjs` 两个自制校验脚本，
+#    Vue SFC 里一处类型写错，在运行时可能只是"数据没显示"，
+#    肉眼审查极难发现，但 build 时必红。
+#
+# 2) **构建产物体积**。有 `compare-build-size.mjs` 说明曾经在意过体积，
+#    但一直靠人手跑 —— 加个大依赖把首页撑胖，没人会立刻发现。
+#
+# 3) **前后端契约**。前端 `src/api/*.ts` 里写的 URL 与后端 Controller 是否对得上，
+#    靠人比对迟早漂移（本项目就发生过"接口压根不存在"）。
+#    注意：完整的契约比对需要**同时检出后端**，这里只跑前端自身的构建与测试。
+#
+# ⚠️ 关于 `npm`/`pnpm`：
+#    本项目开发机上 npm 曾被策略拦截，是用 `node node_modules/vitest/vitest.mjs`
+#    直接跑测试的。CI 环境不受该限制，因此这里用标准的 npm ci。
+# ===================================================================
+
+name: frontend-ci
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    paths:
+      - 'campus-secondhand-frontend/**'
+      - '.github/workflows/frontend-ci.yml'
+  pull_request:
+    branches: [ main, master, develop ]
+    paths:
+      - 'campus-secondhand-frontend/**'
+      - '.github/workflows/frontend-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: 类型检查 + 单测 + 构建
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: campus-secondhand-frontend
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: campus-secondhand-frontend/package-lock.json
+
+      # 用 npm ci 而不是 npm install：严格按 lockfile 安装，
+      # 避免"依赖偷偷升了小版本导致构建行为变化"。
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查（Vue SFC + TS）
+        # 用项目自带的 npm scripts，不手写命令 ——
+        # 脚本里的参数（哪些目录、跳过哪些）是维护过的，CI 不该另立一套。
+        run: npm run check
+
+      - name: 单元测试（Vitest）
+        run: npm test
+
+      - name: 生产构建
+        # ★ 构建必须带真实环境变量：本项目通过 import.meta.env 读取
+        #   VITE_API_BASE 等；缺失时构建虽然能过，但产物会指向错误地址，
+        #   属于"绿的但不可用"，所以这里显式给上生产默认值。
+        #
+        #   注意用 build:no-check 而不是 build：
+        #   `build` = `vue-tsc -b && vite build`，类型检查在上一步已单独跑过，
+        #   这里再用 vue-tsc 跑一遍只是重复；而 vue-tsc -b 走增量缓存，
+        #   在 CI 的干净环境里反而更容易因为 tsbuildinfo 状态而行为不同。
+        env:
+          VITE_API_BASE: /api
+          VITE_USE_MOCK: 'false'
+        run: npm run build:no-check
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: campus-secondhand-frontend/dist
+          if-no-files-found: warn
+          retention-days: 7

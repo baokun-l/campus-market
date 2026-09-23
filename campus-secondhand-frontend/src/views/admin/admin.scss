@@ -1,0 +1,514 @@
+/**
+ * 管理后台共用样式（设计系统层）
+ *
+ * 为什么放在一个「非 scoped」的全局样式里：
+ *   后台有 10 个面板组件，如果每个面板各写一份工具条 / 表格单元格 / 分页样式，
+ *   最终产物里同一批规则会被重复内联 10 次。集中一份、类名统一加 `adm-` 前缀，
+ *   既能复用又能避免污染其它页面。
+ *
+ * 令牌全部来自 @/styles/variables.scss，禁止写死色值（改主题时只改一处）。
+ */
+@use '@/styles/variables.scss' as *;
+
+/* ============================================================
+   1. 面板与卡片
+   ============================================================ */
+
+.adm-pane {
+  display: flex;
+  flex-direction: column;
+  gap: $sp-4;
+}
+
+.adm-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+}
+
+.adm-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $sp-3;
+  flex-wrap: wrap;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.adm-card-title {
+  display: flex;
+  align-items: center;
+  gap: $sp-2;
+  font-size: $fs-15;
+  font-weight: $fw-semibold;
+  color: var(--color-text-primary);
+
+  .el-icon {
+    color: var(--color-text-mute);
+  }
+}
+
+.adm-card-hint {
+  font-size: $fs-12;
+  color: var(--color-text-mute);
+}
+
+.adm-card-body {
+  padding: 16px;
+}
+
+.adm-card-body--flush {
+  padding: 0;
+}
+
+/* ============================================================
+   2. 工具条（搜索 / 筛选 / 批量操作）
+   ============================================================ */
+
+.adm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: $sp-3;
+  flex-wrap: wrap;
+  margin-bottom: $sp-4;
+}
+
+.adm-toolbar-left,
+.adm-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: $sp-2;
+  flex-wrap: wrap;
+}
+
+.adm-toolbar-right {
+  margin-left: auto;
+}
+
+.adm-input {
+  width: 220px;
+}
+
+.adm-select {
+  width: 150px;
+}
+
+/* 批量操作条：选中项 > 0 才出现，避免常驻按钮造成视觉噪音 */
+.adm-batch {
+  display: flex;
+  align-items: center;
+  gap: $sp-3;
+  flex-wrap: wrap;
+  margin-bottom: $sp-3;
+  padding: 9px 14px;
+  border-radius: $radius-sm;
+  background: $color-primary-soft;
+  border: 1px solid $color-primary-light;
+  font-size: $fs-13;
+  color: var(--color-text-secondary);
+
+  b {
+    color: $color-primary;
+    font-variant-numeric: tabular-nums;
+  }
+  .adm-batch-ops {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: $sp-2;
+  }
+}
+
+/* ============================================================
+   3. 表格单元格
+   ============================================================ */
+
+.adm-media {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.adm-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: $radius-sm;
+  flex-shrink: 0;
+  background: var(--bg-soft);
+}
+
+.adm-thumb--sm {
+  width: 34px;
+  height: 34px;
+}
+
+.adm-media-txt {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.45;
+}
+
+/* 文本截断：必须 display:block 才生效（inline 元素上 text-overflow 无效，
+   会导致内容不截断、由 .cell 兜底并多画一个 "…"，表现为列内出现多余省略号） */
+.adm-ellipsis {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adm-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.adm-strong {
+  font-weight: $fw-semibold;
+  color: var(--color-text-primary);
+}
+
+.adm-muted {
+  color: var(--color-text-mute);
+}
+
+.adm-sub {
+  font-size: $fs-12;
+  color: var(--color-text-mute);
+}
+
+.adm-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.adm-price {
+  color: $brand-orange;
+  font-weight: $fw-bold;
+  font-variant-numeric: tabular-nums;
+}
+
+.adm-id {
+  font-size: $fs-12;
+  color: var(--color-text-mute);
+  font-variant-numeric: tabular-nums;
+}
+
+.adm-row-ops {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  white-space: nowrap;
+
+  .el-button {
+    margin-left: 0;
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+}
+
+.adm-pager {
+  display: flex;
+  justify-content: center;
+  margin-top: $sp-4;
+}
+
+/* ============================================================
+   4. 统计条 / 待办条
+   ============================================================ */
+
+.adm-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: $fs-13;
+  color: var(--color-text-mute);
+
+  b {
+    font-size: $fs-15;
+    font-weight: $fw-bold;
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+
+    &.is-ok {
+      color: #059669;
+    }
+    &.is-warn {
+      color: #d97706;
+    }
+    &.is-danger {
+      color: #dc2626;
+    }
+  }
+}
+
+.adm-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border-color-strong);
+}
+
+/* 待办：可点击直达对应页签 */
+.adm-todo {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: $sp-3;
+}
+
+.adm-todo-item {
+  display: flex;
+  align-items: center;
+  gap: $sp-3;
+  padding: 14px 16px;
+  border-radius: $radius-md;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  width: 100%;
+  transition: border-color $dur-slow $ease-out, box-shadow $dur-slow $ease-out,
+    transform $dur-slow $ease-out;
+
+  &:hover {
+    transform: translateY(-2px);
+    border-color: $brand-orange-line;
+    box-shadow: $shadow-sm;
+  }
+  &:active {
+    transform: translateY(0);
+    transition-duration: $dur-fast;
+  }
+  &:focus-visible {
+    outline: 2px solid $color-primary;
+    outline-offset: 2px;
+  }
+
+  .adm-todo-ico {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    border-radius: $radius-sm;
+    font-size: 18px;
+    background: var(--bg-soft);
+    color: var(--color-text-secondary);
+  }
+
+  .adm-todo-txt {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 1px;
+  }
+  .adm-todo-label {
+    font-size: $fs-12;
+    color: var(--color-text-mute);
+  }
+  .adm-todo-value {
+    font-size: $fs-20;
+    font-weight: $fw-bold;
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+  }
+  .adm-todo-go {
+    margin-left: auto;
+    font-size: $fs-12;
+    color: var(--color-text-mute);
+    flex-shrink: 0;
+  }
+
+  /* 有积压时才染色，零待办保持安静 */
+  &.is-active {
+    border-color: $brand-orange-line;
+    background: $brand-orange-soft;
+
+    .adm-todo-ico {
+      background: #fff;
+      color: $brand-orange;
+    }
+    .adm-todo-value {
+      color: $brand-orange-deep;
+    }
+  }
+}
+
+/* ============================================================
+   5. KPI 卡
+   ============================================================ */
+
+.adm-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.adm-kpi {
+  position: relative;
+  padding: 16px 18px;
+  border-radius: $radius-md;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  overflow: hidden;
+  transition: border-color $dur-slow $ease-out, box-shadow $dur-slow $ease-out;
+
+  &:hover {
+    border-color: var(--border-color-strong);
+    box-shadow: $shadow-xs;
+  }
+
+  .adm-kpi-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: $fs-12;
+    color: var(--color-text-mute);
+
+    .el-icon {
+      font-size: 13px;
+    }
+  }
+  .adm-kpi-value {
+    display: block;
+    margin-top: 6px;
+    font-size: $fs-24;
+    font-weight: $fw-bold;
+    color: var(--color-text-primary);
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+  }
+  .adm-kpi-foot {
+    display: block;
+    margin-top: 5px;
+    font-size: $fs-12;
+    color: var(--color-text-mute);
+  }
+
+  /* 只有「金额」这类核心指标用实心强调，其余保持白卡描边 */
+  &.is-hero {
+    background: linear-gradient(135deg, #fff6ed 0%, #fff 62%);
+    border-color: $brand-orange-line;
+
+    .adm-kpi-value {
+      color: $brand-orange-deep;
+    }
+  }
+}
+
+/* ============================================================
+   6. 通用网格 / 列表 / 空态
+   ============================================================ */
+
+.adm-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.adm-empty {
+  padding: 44px 0;
+  text-align: center;
+  font-size: $fs-13;
+  color: var(--color-text-mute);
+}
+
+.adm-dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+
+  .adm-dl-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 14px;
+    border-radius: $radius-sm;
+    background: var(--bg-soft);
+    border: 1px solid var(--border-color);
+
+    span {
+      font-size: $fs-12;
+      color: var(--color-text-mute);
+    }
+    b {
+      font-size: $fs-13;
+      font-weight: $fw-semibold;
+      color: var(--color-text-primary);
+      font-variant-numeric: tabular-nums;
+      word-break: break-all;
+    }
+  }
+}
+
+/* 星级 / 标签行 */
+.adm-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ============================================================
+   7. 弹窗内的两列表单
+   ============================================================ */
+
+.adm-form-row {
+  display: flex;
+  gap: $sp-3;
+
+  > .el-form-item {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+.adm-form-tip {
+  margin: -4px 0 8px 104px;
+  font-size: $fs-12;
+  color: var(--color-text-mute);
+}
+
+/* ============================================================
+   8. 响应式
+   ============================================================ */
+
+@media (max-width: $breakpoint-md) {
+  .adm-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .adm-todo {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .adm-toolbar-right {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: $breakpoint-sm) {
+  .adm-kpi-grid,
+  .adm-todo {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .adm-input,
+  .adm-select {
+    width: 100%;
+  }
+  .adm-form-row {
+    flex-direction: column;
+    gap: 0;
+  }
+  .adm-form-tip {
+    margin-left: 0;
+  }
+  .adm-card-body {
+    padding: 12px;
+  }
+}

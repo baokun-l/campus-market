@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.campus.market.mapper.OrderMapper">
+
+    <resultMap id="orderMap" type="com.campus.market.entity.Order">
+        <id property="id" column="id"/>
+        <result property="status" column="status"/>
+        <result property="goodsId" column="goods_id"/>
+        <result property="goodsTitle" column="goods_title"/>
+        <result property="goodsCover" column="goods_cover"/>
+        <result property="goodsPrice" column="goods_price"/>
+        <result property="goodsPromoPrice" column="goods_promo_price"/>
+        <result property="buyerId" column="buyer_id"/>
+        <result property="buyerName" column="buyer_name"/>
+        <result property="sellerId" column="seller_id"/>
+        <result property="sellerName" column="seller_name"/>
+        <result property="amount" column="amount"/>
+        <result property="listPrice" column="list_price"/>
+        <result property="sellerCut" column="seller_cut"/>
+        <result property="platformSubsidy" column="platform_subsidy"/>
+        <result property="sellerIncome" column="seller_income"/>
+        <result property="fundSource" column="fund_source"/>
+        <result property="activityId" column="activity_id"/>
+        <result property="quantity" column="quantity"/>
+        <result property="remark" column="remark"/>
+        <result property="address" column="address"/>
+        <result property="trackingNo" column="tracking_no"/>
+        <result property="logisticsCompany" column="logistics_company"/>
+        <result property="traces" column="traces"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result property="adminNote" column="admin_note"/>
+        <result property="refundAmount" column="refund_amount"/>
+        <result property="refundReason" column="refund_reason"/>
+        <result property="refundBy" column="refund_by"/>
+        <result property="refundRemark" column="refund_remark"/>
+        <result property="refundTime" column="refund_time"/>
+        <result property="cancelReasonText" column="cancel_reason_text"/>
+        <result property="cancelReasonTime" column="cancel_reason_time"/>
+        <result property="createTime" column="create_time"/>
+        <result property="payTime" column="pay_time"/>
+        <result property="payChannel" column="pay_channel"/>
+        <result property="payExpireAt" column="pay_expire_at"/>
+        <result property="shipTime" column="ship_time"/>
+        <result property="receiveTime" column="receive_time"/>
+        <result property="completeTime" column="complete_time"/>
+    </resultMap>
+
+    <!--
+      ★ 服务时限（超时）判定 —— 列表筛选与统计计数**必须共用同一段 SQL**。
+        各阶段的等待起点按「用户真正在等的那一刻」取，不能一律拿 create_time：
+        刚付款 1 小时但 3 天前就下单的订单，用 create_time 会被误判成超时。
+          pending_payment 从下单算 24h ／ pending_ship 从付款算 48h
+          shipped 从发货算 168h ／ refunding 从申请退款算 48h
+        阈值与前端 api/order.ts 的 ORDER_SLA_HOURS 保持一致。
+    -->
+    <sql id="slaBreach">
+        (
+            (status = 'pending_payment' AND create_time &lt; DATE_SUB(NOW(), INTERVAL 24 HOUR))
+            OR (status = 'pending_ship' AND COALESCE(pay_time, create_time) &lt; DATE_SUB(NOW(), INTERVAL 48 HOUR))
+            OR (status = 'shipped' AND COALESCE(ship_time, create_time) &lt; DATE_SUB(NOW(), INTERVAL 168 HOUR))
+            OR (status = 'refunding' AND COALESCE(refund_time, create_time) &lt; DATE_SUB(NOW(), INTERVAL 48 HOUR))
+        )
+    </sql>
+
+    <!--
+      管理端订单检索条件（列表与导出共用）。
+
+      ★ 这些条件必须在这里全量落地：前端 `fetchAdminOrders()` 把整个 AdminOrderQuery
+      直接当 params 发出来，只要后端没接，用户在界面上勾的「只看售后」「只看超时」
+      「按分组筛选」都会被**静默丢弃** —— 界面看起来筛了，实际返回的还是全量，
+      分页总数与列表内容也会跟着对不上。
+    -->
+    <sql id="adminFilter">
+        <if test="query.status != null and query.status != ''">
+            AND status = #{query.status}
+        </if>
+        <if test="query.statusIn != null and query.statusIn.size() > 0">
+            AND status IN
+            <foreach collection="query.statusIn" item="s" open="(" separator="," close=")">
+                #{s}
+            </foreach>
+        </if>
+        <if test="query.keyword != null and query.keyword != ''">
+            AND (
+                id LIKE CONCAT('%', #{query.keyword}, '%')
+                OR goods_title LIKE CONCAT('%', #{query.keyword}, '%')
+                OR buyer_name LIKE CONCAT('%', #{query.keyword}, '%')
+                OR seller_name LIKE CONCAT('%', #{query.keyword}, '%')
+                OR tracking_no LIKE CONCAT('%', #{query.keyword}, '%')
+            )
+        </if>
+        <if test="query.minAmount != null">
+            AND amount >= #{query.minAmount}
+        </if>
+        <if test="query.maxAmount != null">
+            AND amount &lt;= #{query.maxAmount}
+        </if>
+        <if test="query.fundSource != null and query.fundSource != ''">
+            AND fund_source = #{query.fundSource}
+        </if>
+        <!-- dateTo 由控制器补成当天 23:59:59，否则 `<= '2026-09-11'` 会把当天整天漏掉 -->
+        <if test="query.dateFrom != null and query.dateFrom != ''">
+            AND create_time >= #{query.dateFrom}
+        </if>
+        <if test="query.dateTo != null and query.dateTo != ''">
+            AND create_time &lt;= #{query.dateTo}
+        </if>
+        <if test="query.onlyRemark != null and query.onlyRemark == true">
+            AND remark IS NOT NULL AND remark != ''
+        </if>
+        <if test="query.onlyNoted != null and query.onlyNoted == true">
+            AND admin_note IS NOT NULL AND admin_note != ''
+        </if>
+        <!-- 只看需要人工介入的（待付款 / 待发货 / 售后中），与前端 ORDER_TODO_STATUS 同口径 -->
+        <if test="query.onlyTodo != null and query.onlyTodo == true">
+            AND status IN ('pending_payment', 'pending_ship', 'refunding')
+        </if>
+        <if test="query.onlyIssue != null and query.onlyIssue == true">
+            AND <include refid="slaBreach"/>
+        </if>
+    </sql>
+
+    <!--
+      「买 / 卖家我的订单」——★ 默认必须收敛到「我参与的」★
+
+      原来只在 role 显式等于 buyer / seller 时才加过滤条件，
+      于是 `GET /orders` **不传 role** 时 WHERE 只剩 `1=1` → 返回**全表所有订单**。
+      这不只是多显示了别人的单：收货地址、买家昵称、实付金额、后台备注都会一起漏出去。
+
+      为什么这个洞长期没被发现：t_order 此前一直是空表（schema.sql 不播种订单），
+      任何人都只能拿到空列表，看起来就像「还没下过单」。一旦按 demo-data-orders.sql
+      播了订单，登录任意买家都会在「我的订单」里看到其它用户的单。
+
+      修正口径（与接口名「我的订单」一致）：
+        role='buyer'  → 我只作为买家
+        role='seller' → 我只作为卖家
+        不传 role     → 我参与的（买家 或 卖家），即默认视图
+      前端 `fetchOrders` 从不传 role（Profile.vue / order/Index.vue 都只传 status），
+      所以这个 otherwise 分支就是线上真实走到的那条 —— 不能省。
+
+      注意：管理端走的是 selectAdminOrders（/admin/orders），不受此改动影响。
+    -->
+    <select id="selectUserOrders" resultMap="orderMap">
+        SELECT * FROM t_order WHERE 1=1
+        <choose>
+            <when test="role == 'buyer'">
+                AND buyer_id = #{userId}
+            </when>
+            <when test="role == 'seller'">
+                AND seller_id = #{userId}
+            </when>
+            <otherwise>
+                AND (buyer_id = #{userId} OR seller_id = #{userId})
+            </otherwise>
+        </choose>
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+        ORDER BY create_time DESC
+    </select>
+
+    <select id="selectAdminOrders" resultMap="orderMap">
+        SELECT * FROM t_order WHERE 1=1
+        <include refid="adminFilter"/>
+        ORDER BY
+        <choose>
+            <when test="query.sort == 'time_asc'">create_time ASC</when>
+            <when test="query.sort == 'amount_desc'">amount DESC</when>
+            <when test="query.sort == 'amount_asc'">amount ASC</when>
+            <otherwise>create_time DESC</otherwise>
+        </choose>
+    </select>
+
+    <!--
+      导出：与列表共用 adminFilter，但**必须自带 LIMIT**。
+      这条查询不带 IPage 参数，因此不会经过分页拦截器，
+      MybatisPlusConfig 的 setMaxLimit(500) 对它无效 ——
+      少了 LIMIT 就是一次全表读取（订单量上万时整表进内存）。
+      pageSize 由 OrderService.fetchAdminOrdersForExport 钳制到 [1, 5000] 后必然存在。
+    -->
+    <select id="selectAdminOrdersForExport" resultMap="orderMap">
+        SELECT * FROM t_order WHERE 1=1
+        <include refid="adminFilter"/>
+        ORDER BY create_time DESC
+        LIMIT #{pageSize}
+    </select>
+
+    <!--
+      订单工作台总览聚合。字段与前端 `AdminOrderStats` 一一对应：
+        gmv            仅「已成交」状态（待付款的钱还没收到，不能算进去）
+        pendingGmv     已付款但还没走完
+        refundedAmount 有退款完成时间的单，部分退款按实退金额算
+        issues         踩到服务时限的单数（与 onlyIssue 筛选共用 slaBreach）
+    -->
+    <select id="selectOrderStats" resultType="map">
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN status IN ('pending_ship','shipped','received','completed')
+                     THEN COALESCE(amount, 0) ELSE 0 END) AS gmv,
+            SUM(CASE WHEN status IN ('pending_ship','shipped','received')
+                     THEN COALESCE(amount, 0) ELSE 0 END) AS pendingGmv,
+            SUM(CASE WHEN refund_time IS NOT NULL
+                     THEN COALESCE(refund_amount, amount, 0) ELSE 0 END) AS refundedAmount,
+            SUM(CASE WHEN create_time >= CURDATE() THEN 1 ELSE 0 END) AS todayCount,
+            SUM(CASE WHEN <include refid="slaBreach"/> THEN 1 ELSE 0 END) AS issues
+        FROM t_order
+    </select>
+
+    <!-- 按状态汇总笔数与金额；分组口径（哪几个状态合成「售后中」）在 Service 层统一拼接 -->
+    <select id="selectStatusStats" resultType="com.campus.market.dto.OrderStatusStat">
+        SELECT
+            status AS status,
+            COUNT(*) AS cnt,
+            SUM(CASE WHEN status = 'pending_payment' THEN 0 ELSE COALESCE(amount, 0) END) AS amt
+        FROM t_order
+        GROUP BY status
+    </select>
+
+</mapper>

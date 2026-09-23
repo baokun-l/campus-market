@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.campus.market.mapper.ReportMapper">
+
+    <select id="selectReportPage" resultType="com.campus.market.entity.Report">
+        SELECT * FROM t_report WHERE 1=1
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+        <if test="type != null and type != ''">
+            AND type = #{type}
+        </if>
+        ORDER BY
+            CASE status WHEN 'pending' THEN 0 ELSE 1 END,
+            create_time DESC
+    </select>
+
+    <select id="selectReportStats" resultType="map">
+        SELECT
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+            SUM(CASE WHEN status = 'handled' THEN 1 ELSE 0 END) AS handled,
+            SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected
+        FROM t_report
+    </select>
+
+</mapper>

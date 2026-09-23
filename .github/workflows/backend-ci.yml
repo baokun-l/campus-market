@@ -1,0 +1,95 @@
+# ===================================================================
+# 后端 CI —— 每次 push / PR 都跑「编译 + 全量单测」
+# -------------------------------------------------------------------
+# ★ 为什么这条流水线值得存在（它防的不是"手抖"，是三类真事故）★
+#
+# 1) 「改了 A 忘了 B」——本项目最贵的一类缺陷。
+#    历史实例：单条通道加了状态校验、批量通道漏了（越权绕过）；
+#              单条删商品清了评论、批量没清；`@RequiredArgsConstructor` 的 Service
+#              加字段后所有单测的构造调用没同步改。
+#    这类问题**单线程、看代码都不容易发现**，但一跑测试立刻红。
+#
+# 2) 「本地能跑，干净环境跑不起来」——本项目的离线 Maven 仓库只在本机有。
+#    本机 `mvn -o` 成功不代表别人/服务器上能解析依赖。
+#    这条 CI **不用 -o**（走公网仓库），恰好覆盖了"依赖确实声明完整"这件事。
+#
+# 3) 「测试是绿的，但其实没在守那件事」——本项目已两次抓到
+#    「永远为真」的断言（B3-a 的 off_shelf/on_sale 对调照样通过）与
+#    「被 Mock 掩盖」的真实缺陷（Mock 清了字段、真实实现漏清）。
+#    所以这里**强制全量 test**，不允许 `-DskipTests` 混进 CI。
+# ===================================================================
+
+name: backend-ci
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    paths:
+      - 'campus-secondhand-backend/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    branches: [ main, master, develop ]
+    paths:
+      - 'campus-secondhand-backend/**'
+      - '.github/workflows/backend-ci.yml'
+  # 允许在 Actions 页面手动触发
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: 编译 + 全量单测
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        # 后端是独立模块目录，所有命令都在此执行
+        working-directory: campus-secondhand-backend
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          # 缓存 ~/.m2，避免每次全量下载依赖
+          cache: maven
+
+      # 注意：这里**刻意不用 -o（离线）**。
+      # 本机开发时用离线仓库是为了速度与稳定性，
+      # 但 CI 走公网才能真正验证「pom 里的依赖声明是完整的」——
+      # 离线仓库会掩盖「某个依赖只在本机缓存里、没写进 pom」这类问题。
+      - name: 编译
+        run: mvn -B -DskipTests clean compile
+
+      # ★ 关键步骤：全量单元测试，不允许跳过。
+      # 本项目的单元测试守的不是覆盖率，而是几条「单线程看不出来」的硬约束：
+      #   · 清空列必须走 LambdaUpdateWrapper.set(col, null)（updateById 写不了 NULL）
+      #   · SET 段只允许出现指定的那一列（防"整实体回写"盖掉别人写的列）
+      #   · 费率单位换算只允许发生在 api/settings.ts 边界
+      #   · 配置项 0 / NULL = 关闭（缺配置放宽，绝不收紧）
+      - name: 全量单元测试
+        run: mvn -B test
+
+      - name: 打包（跳过测试，此时测试已单独跑过）
+        run: mvn -B -DskipTests package
+
+      - name: 上传测试报告
+        # 即使测试失败也要把报告传上来，否则排查全靠重跑
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: campus-secondhand-backend/target/surefire-reports/**
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: campus-secondhand-backend/target/*.jar
+          if-no-files-found: warn
+          retention-days: 7

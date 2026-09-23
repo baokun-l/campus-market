@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Maven 构建用镜像 + 本地仓库配置（校园二手集市后端）
+
+  ★ 为什么必须显式写 <localRepository> ★
+  Maven 会把「global settings（Maven 安装目录下 conf/settings.xml）」与「-s 指定的 settings」
+  合并，且 -s 指定的优先级更高 —— 但**只有显式声明的项才会覆盖**。
+  本机 Maven 安装目录的 conf/settings.xml 里写了
+      <localRepository>C:\Program Files\Java\apache-maven\respository</localRepository>
+  而该目录 **无写权限**（Program Files 默认 ACL），Maven 往里写依赖会 Access Denied。
+  因此这里显式指定一个**可写且已缓存过本项目全部依赖**的仓库目录，
+  让 -s 的声明覆盖 global 的那一行。
+
+  ★ 为什么镜像 id 固定成 aliyun-public ★
+  localRepository 里的依赖全部来自 id 为 aliyun-public 的仓库，
+  而 Maven 3.9 在离线模式下会校验「制品来源 id」是否与当前生效的仓库 id 一致 ——
+  不一致就判定为「未下载过」，即使 jar 就在磁盘上也会报 Non-resolvable parent POM。
+
+  用法（Maven 本体用 C:\Program Files\Java\apache-maven 下的 3.8.4）：
+    "C:\Program Files\Java\apache-maven\apache-maven-3.8.4\bin\mvn.cmd" ^
+        -s .workbuddy/mvn-aliyun-settings.xml -DskipTests clean package
+
+  加 -o 可走纯离线（依赖已全部缓存）；换机器或加依赖时去掉 -o。
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                              https://maven.apache.org/xsd/settings-1.0.0.xsd">
+    <!-- 可写、且已缓存 Spring Boot 3.2.5 / Spring AI M6 全套依赖的本地仓库 -->
+    <localRepository>D:\apache-maven-3.9.4\mvn_repo</localRepository>
+
+    <mirrors>
+        <mirror>
+            <id>aliyun-public</id>
+            <name>Aliyun Maven Public</name>
+            <url>https://maven.aliyun.com/repository/public</url>
+            <!-- 覆盖全部仓库：pom 里声明的 spring-milestones 也一并走阿里云，避免直连境外仓库 -->
+            <mirrorOf>*</mirrorOf>
+        </mirror>
+    </mirrors>
+</settings>

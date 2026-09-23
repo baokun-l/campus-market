@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.campus.market.mapper.CategoryMapper">
+
+    <select id="selectCategoryStats" resultType="map">
+        SELECT c.*, (
+            SELECT COUNT(*) FROM t_goods g WHERE g.category_id = c.id
+        ) AS count
+        FROM t_category c
+        ORDER BY c.id ASC
+    </select>
+
+</mapper>

@@ -1,0 +1,8 @@
+﻿=== 实践任务目录 ===
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务2：Web前端开发(Vue3+Element Plus+ECharts)
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)
+
+=== T3 工作区顶层 ===
+d----- | .workbuddy
+d----- | campus-secondhand-backend
+d----- | campus-secondhand-frontend

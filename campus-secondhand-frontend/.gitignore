@@ -1,0 +1,36 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+# ★ 优化版构建产物（`vite.analyze.config.ts` / 打包脚本输出）。
+# 此前清单 L7 记的是「dist-opt/ 未进 .gitignore」，复核时该目录**已不存在**（§15.1 判为失效）。
+# 但配置里那条分析构建随时可能再产出同名目录，所以预先补上，避免同一问题再发生一次。
+dist-opt
+coverage
+*.local
+
+# IDE / Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Auto-generated type files
+src/types/auto-imports.d.ts
+src/types/components.d.ts
+
+# Vite / Vitest 临时配置产物（每次构建重新生成，不应入库）
+*.timestamp-*.mjs

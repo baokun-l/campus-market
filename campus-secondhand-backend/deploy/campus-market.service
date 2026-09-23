@@ -1,0 +1,73 @@
+# ====================================================================
+# 校园二手集市后端 · systemd unit
+# ====================================================================
+# 安装：
+#   sudo cp campus-market.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now campus-market
+# 常用：
+#   journalctl -u campus-market -f          # 跟日志
+#   sudo systemctl restart campus-market    # 重启（走优雅停机）
+#
+# ★★ 三处「漏了就会出事」的地方，改这个文件时要特别小心 ★★
+#   1. SuccessExitStatus=143 —— 优雅停机（server.shutdown=graceful）被 SIGTERM 终止时
+#      退出码是 143。不声明，systemd 会把它判为「失败」并按 Restart=on-failure 立刻重启，
+#      表现为「重启命令永远返回慢/服务反复起停」。
+#   2. --spring.profiles.active=prod **写死在这里**，不允许外部传。
+#      带上 demo 会 DELETE 掉 t_goods / t_category 再灌演示数据（DeploymentGuard 也会拦，
+#      但那是第二道防线，第一道就该是「压根没人能传进来」）。
+#   3. EnvironmentFile 指向的文件权限必须是 600 且属主 campus ——
+#      凭据不要写进 ExecStart（ps 能看到），也不要 export 进 shell（会进 .bash_history）。
+# ====================================================================
+
+[Unit]
+Description=Campus Secondhand Market backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=campus
+Group=campus
+WorkingDirectory=/opt/campus-market
+
+# 凭据只在这里；文件权限 600
+EnvironmentFile=/etc/campus-market/env
+Environment=TZ=Asia/Shanghai
+
+ExecStart=/usr/bin/java \
+  -Duser.timezone=Asia/Shanghai \
+  -Xms512m -Xmx1g \
+  -XX:+UseG1GC \
+  -XX:+ExitOnOutOfMemoryError \
+  -jar /opt/campus-market/app.jar \
+  --spring.profiles.active=prod \
+  --server.port=8080
+
+# 优雅停机（graceful）被 SIGTERM 终止时的退出码
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=5
+
+# ---- 最小权限加固 ----
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# ProtectSystem=strict 下整个文件系统只读，这两处要显式放开写权限
+#
+# ★★ 日志目录必须在这里，否则 P0-8 的落盘配置在生产上等于没做 ★★
+# ProtectSystem=strict 把根文件系统挂成只读，只有 ReadWritePaths 列出的路径可写。
+# 早先这里只放了 uploads，而 prod 的 app.log-dir 是 /data/campus/logs
+# （见 application-prod.yml 的 LOG_DIR 默认值）——
+# 于是 logback 在启动时创建日志文件失败，**只在控制台打一行错误**，
+# 之后服务照常运行、错误照常发生，而 /data/campus/logs 里什么都没有。
+# 这类故障最坏的地方是它"看起来完全正常"：journalctl 里能看到 stdout 的日志，
+# 直到事后去翻文件才发现那个目录从来就是空的。
+# 现在 /api/health 会探测日志目录可写性（data.log.writable），
+# 不可写时整体状态报 DEGRADED —— 让这个静默故障变成可观测的。
+# 注意：新建目录后属主必须是 campus:campus，否则本行给了权限也写不进去。
+ReadWritePaths=/data/campus/uploads /data/campus/logs
+
+[Install]
+WantedBy=multi-user.target

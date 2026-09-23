@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.campus.market.mapper.ReviewMapper">
+
+    <select id="selectByGoods" resultType="com.campus.market.entity.Review">
+        SELECT * FROM t_review WHERE goods_id = #{goodsId} ORDER BY create_time DESC
+    </select>
+
+    <select id="selectByUser" resultType="com.campus.market.entity.Review">
+        SELECT * FROM t_review WHERE to_user_id = #{userId} ORDER BY create_time DESC
+    </select>
+
+    <select id="selectByOrder" resultType="com.campus.market.entity.Review">
+        SELECT * FROM t_review WHERE order_id = #{orderId} LIMIT 1
+    </select>
+
+    <select id="selectAdminReviews" resultType="map">
+        SELECT r.*, g.title AS goodsTitle
+        FROM t_review r
+        LEFT JOIN t_goods g ON g.id = r.goods_id
+        WHERE 1=1
+        <if test="keyword != null and keyword != ''">
+            AND (r.content LIKE CONCAT('%', #{keyword}, '%')
+                 OR r.from_user_name LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="rating != null">
+            <choose>
+                <when test="rating == 'low'">
+                    AND r.rating &lt;= 3
+                </when>
+                <otherwise>
+                    AND r.rating = #{rating}
+                </otherwise>
+            </choose>
+        </if>
+        ORDER BY r.create_time DESC
+    </select>
+
+</mapper>

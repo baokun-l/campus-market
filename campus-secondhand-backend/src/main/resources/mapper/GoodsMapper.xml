@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.campus.market.mapper.GoodsMapper">
+
+    <resultMap id="goodsMap" type="com.campus.market.entity.Goods">
+        <id property="id" column="id"/>
+        <result property="title" column="title"/>
+        <result property="price" column="price"/>
+        <result property="promoPrice" column="promo_price"/>
+        <result property="activityId" column="activity_id"/>
+        <result property="cover" column="cover"/>
+        <result property="images" column="images"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result property="description" column="description"/>
+        <result property="status" column="status"/>
+        <result property="stock" column="stock"/>
+        <result property="deliveryMethod" column="delivery_method"/>
+        <result property="categoryId" column="category_id"/>
+        <result property="categoryName" column="category_name"/>
+        <result property="sellerId" column="seller_id"/>
+        <result property="sellerName" column="seller_name"/>
+        <result property="sellerAvatar" column="seller_avatar"/>
+        <result property="location" column="location"/>
+        <result property="viewCount" column="view_count"/>
+        <result property="favoriteCount" column="favorite_count"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <select id="selectGoodsPage" resultMap="goodsMap">
+        SELECT * FROM t_goods WHERE 1=1
+        <if test="keyword != null and keyword != ''">
+            AND title LIKE CONCAT('%', #{keyword}, '%')
+        </if>
+        <if test="categoryId != null">
+            AND category_id = #{categoryId}
+        </if>
+        <if test="sellerId != null">
+            AND seller_id = #{sellerId}
+        </if>
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+        <if test="statuses != null and statuses.size() > 0">
+            AND status IN
+            <foreach collection="statuses" item="s" open="(" separator="," close=")">
+                #{s}
+            </foreach>
+        </if>
+        ORDER BY
+        <choose>
+            <when test="sort == 'price_asc'">price ASC</when>
+            <when test="sort == 'price_desc'">price DESC</when>
+            <when test="sort == 'hot'">view_count DESC</when>
+            <otherwise>create_time DESC</otherwise>
+        </choose>
+    </select>
+
+    <select id="countByCategory" resultType="int">
+        SELECT COUNT(*) FROM t_goods WHERE category_id = #{categoryId}
+    </select>
+
+    <update id="batchUpdateStatus">
+        UPDATE t_goods SET status = #{status} WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
+</mapper>

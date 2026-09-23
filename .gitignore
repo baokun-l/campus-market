@@ -1,0 +1,36 @@
+# ===================================================================
+# 仓库根 .gitignore（2026-09-23 · D-GIT 销项）
+# -------------------------------------------------------------------
+# 两个子模块各有自己的 .gitignore（backend: target/dist/uploads/logs/IDE；
+# frontend: node_modules/dist/coverage/IDE），这里只管根级与 .workbuddy。
+# ★ .workbuddy 分两类：
+#   · 进库 —— *.mjs（审计/探针/同步脚本，是这套工程纪律的载体）、
+#             memory/（项目长期记忆与逐轮日志）、mvn-aliyun-settings.xml、selfcheck/
+#   · 不进 —— bak-*/（同步前备份副本）、tmp/、各种 *.log / 临时 *.txt /
+#             bak-full-*.sql（含演示库口令哈希的 dump）
+# ===================================================================
+
+# ---------- .workbuddy：备份 / 临时 / 日志 ----------
+.workbuddy/bak-*/
+.workbuddy/tmp/
+.workbuddy/bak-full-*.sql
+.workbuddy/**/*.log
+.workbuddy/*.log
+.workbuddy/*.txt
+
+# ---------- 防御性兜底（子模块已忽略，这里防「从根直接构建」的落点） ----------
+node_modules/
+target/
+dist/
+uploads/
+logs/
+*.log
+
+# ---------- 操作系统 ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- 敏感配置兜底 ----------
+.env
+.env.local

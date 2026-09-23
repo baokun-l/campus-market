@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.campus.market.mapper.AnalyticsMapper">
+
+    <!--
+      按日浏览量 / 访客数。
+      t_history 是用户浏览商品时留下的足迹表，天然就是一份 PV/UV 日志：
+        pv = 当日足迹条数
+        uv = 当日去重用户数
+      所以趋势图不需要额外的埋点表，也不需要系数放大。
+      DATE 是非保留字，但显式加反引号以免与 MySQL 关键字规则变化冲突。
+    -->
+    <select id="selectDailyViews" resultType="com.campus.market.dto.TrendPoint">
+        SELECT
+            DATE_FORMAT(h.view_time, '%Y-%m-%d') AS `date`,
+            COUNT(*)                             AS pv,
+            COUNT(DISTINCT h.user_id)            AS uv
+        FROM t_history h
+        WHERE h.view_time >= #{from}
+        GROUP BY DATE_FORMAT(h.view_time, '%Y-%m-%d')
+        ORDER BY `date` ASC
+    </select>
+
+    <select id="selectDailyOrders" resultType="com.campus.market.dto.TrendPoint">
+        SELECT
+            DATE_FORMAT(o.create_time, '%Y-%m-%d') AS `date`,
+            COUNT(*)                               AS orders
+        FROM t_order o
+        WHERE o.create_time >= #{from}
+        GROUP BY DATE_FORMAT(o.create_time, '%Y-%m-%d')
+        ORDER BY `date` ASC
+    </select>
+
+    <!-- 分类占比：以商品上的冗余列 category_name 为准，空值归入「未分类」 -->
+    <select id="selectCategoryDistribution" resultType="com.campus.market.dto.NameValue">
+        SELECT
+            COALESCE(NULLIF(g.category_name, ''), '未分类') AS name,
+            COUNT(*)                                        AS `value`
+        FROM t_goods g
+        GROUP BY COALESCE(NULLIF(g.category_name, ''), '未分类')
+        ORDER BY COUNT(*) DESC
+    </select>
+
+    <!--
+      热销榜：按成交单数排序。
+      pending_ship / shipped / received / completed 才是真正「已成交」的口径，
+      pending_payment 未付款、cancelled / refunding 不计入带货能力。
+    -->
+    <select id="selectHotGoods" resultType="com.campus.market.dto.GoodsSalesStat">
+        SELECT
+            o.goods_id AS goodsId,
+            COUNT(*)   AS soldCount,
+            SUM(o.amount) AS amount
+        FROM t_order o
+        WHERE o.status IN ('pending_ship', 'shipped', 'received', 'completed')
+        GROUP BY o.goods_id
+        ORDER BY COUNT(*) DESC, SUM(o.amount) DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 操作日志分类计数：action 形如 goods.batchDelete，取第一个点之前的前缀 -->
+    <select id="countAuditLogsByType" resultType="com.campus.market.dto.NameValue">
+        SELECT
+            SUBSTRING_INDEX(a.action, '.', 1) AS name,
+            COUNT(*)                          AS `value`
+        FROM t_audit_log a
+        GROUP BY SUBSTRING_INDEX(a.action, '.', 1)
+    </select>
+
+</mapper>

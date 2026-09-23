@@ -1,0 +1,273 @@
+// ============================================================
+// Design Tokens · 校园集市
+// 基准：参考图 6.3（整体布局结构） / 6.4（关键页面 mock）
+// ------------------------------------------------------------
+// ⚠️ 修复说明（本轮重点）
+// 旧版 variables.scss 只定义了 --el-* 系列，但全项目约 110 处
+// 引用了 var(--radius-md) / var(--color-text-mute) / var(--bg-soft)
+// / var(--border-color) / var(--shadow-*) 等**从未定义**的变量。
+// 结果：圆角全部失效（退化成直角）、灰字变黑、边框与阴影消失 ——
+// 这正是界面"圆角不一致 / 层级扁平 / 视觉割裂"的根因。
+// 现在把所有被引用的变量在 :root 里补齐，并升级为一套完整令牌。
+// ============================================================
+
+// ---------------- 品牌色 ----------------
+$brand-orange: #ff6a00; // 主品牌橙：Logo / 价格 / 主 CTA
+$brand-orange-deep: #e85d00; // 橙色按下态
+$brand-orange-soft: #fff4e6; // 橙色浅底：促销条 / 折扣标签
+$brand-orange-line: #ffe0c2; // 橙色描边
+
+$color-primary: #2563eb; // 交互蓝：发布 / 链接 / 侧栏激活
+$color-primary-hover: #1d4ed8;
+$color-primary-soft: #eef4ff; // 蓝色浅底：激活菜单项
+$color-primary-light: #dbeafe;
+
+$color-accent: $brand-orange; // 强调色与品牌橙统一（价格、折扣）
+$color-success: #10b981;
+$color-warning: #f59e0b;
+$color-danger: #ef4444;
+$color-info: #6b7280;
+
+// ---------------- 文本色 ----------------
+$text-1: #1f2329; // 主文本 / 标题
+$text-2: #646a73; // 次要文本 / 正文
+$text-3: #8f959e; // 弱化文本 / 占位符
+$text-4: #bbbfc4; // 极弱：划线原价 / 禁用
+$text-inverse: #ffffff;
+
+$color-text-primary: $text-1;
+$color-text-secondary: $text-2;
+$color-text-mute: $text-3;
+$color-text-disabled: $text-4;
+
+// ---------------- 背景 / 边框 ----------------
+$bg-page: #f2f3f5; // 页面底色（比旧版更沉，衬托白卡）
+$bg-card: #ffffff;
+$bg-soft: #f7f8fa; // 次级填充：描述块 / 搜索框 / 图标底
+$bg-hover: #f2f3f5;
+$border-color: #eef0f3; // 常规分隔线
+$border-color-strong: #e5e6eb; // 输入框描边 / 强调分隔
+
+// ---------------- 圆角 ----------------
+$radius-xs: 4px;
+$radius-sm: 8px;
+$radius-md: 12px; // 卡片默认
+$radius-lg: 16px; // 大容器 / 促销条
+$radius-pill: 999px; // 药丸按钮 / 标签
+
+// ---------------- 阴影（参考图：极轻，靠边框分层） ----------------
+$shadow-xs: 0 1px 2px rgba(31, 35, 41, 0.04);
+$shadow-sm: 0 2px 8px -2px rgba(31, 35, 41, 0.08);
+$shadow-md: 0 6px 16px -6px rgba(31, 35, 41, 0.12);
+$shadow-lg: 0 12px 32px -8px rgba(31, 35, 41, 0.16);
+$shadow-brand: 0 6px 16px -6px rgba(255, 106, 0, 0.42);
+$shadow-primary: 0 6px 16px -6px rgba(37, 99, 235, 0.42);
+
+// ---------------- 间距节奏（4px 基准） ----------------
+$sp-1: 4px;
+$sp-2: 8px;
+$sp-3: 12px;
+$sp-4: 16px;
+$sp-5: 20px;
+$sp-6: 24px;
+$sp-8: 32px;
+
+$spacing-xs: $sp-1;
+$spacing-sm: $sp-2;
+$spacing-md: $sp-4;
+$spacing-lg: $sp-6;
+$spacing-xl: $sp-8;
+
+// ---------------- 字号 / 字重 ----------------
+$fs-11: 11px;
+$fs-12: 12px;
+$fs-13: 13px;
+$fs-14: 14px;
+$fs-15: 15px;
+$fs-16: 16px;
+$fs-17: 17px;
+$fs-18: 18px;
+$fs-20: 20px;
+$fs-22: 22px;
+$fs-24: 24px;
+$fs-28: 28px;
+
+$font-xs: $fs-12;
+$font-sm: $fs-13;
+$font-md: $fs-14;
+$font-lg: $fs-16;
+$font-xl: $fs-18;
+$font-2xl: $fs-22;
+$font-3xl: $fs-28;
+
+$fw-normal: 400;
+$fw-medium: 500;
+$fw-semibold: 600;
+$fw-bold: 700;
+
+$font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+  'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+// 等宽字体：订单号 / 验证码 / 行内代码片段等「逐字符阅读」的场景
+$font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+  'Liberation Mono', 'Courier New', monospace;
+
+// ---------------- 动效 ----------------
+$ease-out: cubic-bezier(0.22, 1, 0.36, 1); // easeOutExpo：迎上快、收尾柔
+$ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+$dur-fast: 120ms;
+$dur-base: 180ms;
+$dur-slow: 280ms;
+
+// ---------------- 尺寸 ----------------
+$header-h: 64px;
+$sidebar-w: 216px;
+$sidebar-w-collapsed: 68px;
+$content-max: 1360px;
+
+// ---------------- 层级 ----------------
+$z-header: 100;
+$z-drawer: 2000;
+$z-toast: 3000;
+
+// ---------------- 断点 ----------------
+$breakpoint-sm: 640px;
+$breakpoint-md: 1024px;
+$breakpoint-lg: 1280px;
+
+// ============================================================
+// CSS 自定义属性（运行时可用）
+// 这一块是**修复悬空引用的关键**：项目里所有 var(--xxx) 都在这
+// ============================================================
+:root {
+  // 品牌 / 功能色
+  --brand-orange: #{$brand-orange};
+  --brand-orange-deep: #{$brand-orange-deep};
+  --brand-orange-soft: #{$brand-orange-soft};
+  --brand-orange-line: #{$brand-orange-line};
+  --color-primary: #{$color-primary};
+  --color-primary-hover: #{$color-primary-hover};
+  --color-primary-soft: #{$color-primary-soft};
+  --color-primary-light: #{$color-primary-light};
+  --color-accent: #{$color-accent};
+  --color-success: #{$color-success};
+  --color-warning: #{$color-warning};
+  --color-danger: #{$color-danger};
+  --color-info: #{$color-info};
+
+  // 文本
+  --color-text-primary: #{$text-1};
+  --color-text-secondary: #{$text-2};
+  --color-text-mute: #{$text-3};
+  --color-text-disabled: #{$text-4};
+  --color-text-inverse: #{$text-inverse};
+
+  // 背景 / 边框
+  --bg-page: #{$bg-page};
+  --bg-card: #{$bg-card};
+  --bg-soft: #{$bg-soft};
+  --bg-hover: #{$bg-hover};
+  --border-color: #{$border-color};
+  --border-color-strong: #{$border-color-strong};
+
+  // 圆角
+  --radius-xs: #{$radius-xs};
+  --radius-sm: #{$radius-sm};
+  --radius-md: #{$radius-md};
+  --radius-lg: #{$radius-lg};
+  --radius-pill: #{$radius-pill};
+
+  // 阴影
+  --shadow-xs: #{$shadow-xs};
+  --shadow-sm: #{$shadow-sm};
+  --shadow-md: #{$shadow-md};
+  --shadow-lg: #{$shadow-lg};
+  --shadow-brand: #{$shadow-brand};
+  --shadow-primary: #{$shadow-primary};
+
+  // 间距
+  --sp-1: #{$sp-1};
+  --sp-2: #{$sp-2};
+  --sp-3: #{$sp-3};
+  --sp-4: #{$sp-4};
+  --sp-5: #{$sp-5};
+  --sp-6: #{$sp-6};
+  --sp-8: #{$sp-8};
+
+  // 动效
+  --ease-out: #{$ease-out};
+  --dur-fast: #{$dur-fast};
+  --dur-base: #{$dur-base};
+  --dur-slow: #{$dur-slow};
+
+  // 关键尺寸
+  --header-h: #{$header-h};
+  --sidebar-w: #{$sidebar-w};
+
+  // ---------------- Element Plus 主题覆盖 ----------------
+  --el-color-primary: #{$color-primary};
+  --el-color-primary-light-3: #{mix(#fff, $color-primary, 30%)};
+  --el-color-primary-light-5: #{mix(#fff, $color-primary, 50%)};
+  --el-color-primary-light-7: #{mix(#fff, $color-primary, 70%)};
+  --el-color-primary-light-8: #{mix(#fff, $color-primary, 80%)};
+  --el-color-primary-light-9: #{$color-primary-soft};
+  --el-color-primary-dark-2: #{$color-primary-hover};
+  --el-color-success: #{$color-success};
+  --el-color-warning: #{$color-warning};
+  --el-color-danger: #{$color-danger};
+  --el-color-error: #{$color-danger};
+  --el-color-info: #{$color-info};
+
+  --el-text-color-primary: #{$text-1};
+  --el-text-color-regular: #{$text-2};
+  --el-text-color-secondary: #{$text-3};
+  --el-text-color-placeholder: #{$text-3};
+
+  --el-border-color: #{$border-color-strong};
+  --el-border-color-light: #{$border-color};
+  --el-border-color-lighter: #{$border-color};
+  --el-fill-color-blank: #{$bg-card};
+  --el-fill-color-light: #{$bg-soft};
+
+  --el-border-radius-base: #{$radius-sm};
+  --el-border-radius-small: #{$radius-xs};
+  --el-border-radius-round: #{$radius-pill};
+
+  --el-font-size-base: #{$fs-14};
+  --el-box-shadow-light: #{$shadow-sm};
+  --el-box-shadow: #{$shadow-md};
+}
+
+// ============================================================
+// 深色模式（html.dark 由 app store 切换）
+// 只覆盖中性色族；品牌橙 / 语义色（成功/危险等）两版通用。
+// 值与 stores/modules/app.ts 的 DARK_TOKENS 保持一致。
+// ============================================================
+html.dark {
+  --bg-page: #101214;
+  --bg-card: #1a1d22;
+  --bg-soft: #22262c;
+  --bg-hover: #272c33;
+  --border-color: #2b3138;
+  --border-color-strong: #3a424b;
+  --color-text-primary: #e8eaed;
+  --color-text-secondary: #a8afb9;
+  --color-text-mute: #7d8590;
+  --color-text-disabled: #59616c;
+  // 主色浅底（激活菜单项等）：深色下改为「主色 + 暗卡底」低比例混色，
+  // 否则浅蓝 #eef4ff 在暗侧栏里像一块补丁。跟随 --color-primary（主题色联动）。
+  --color-primary-soft: color-mix(in srgb, var(--color-primary) 20%, var(--bg-card));
+
+  // Element Plus 侧的中性令牌同步翻转（dark/css-vars.css 负责主色阶）
+  --el-bg-color: #1a1d22;
+  --el-bg-color-page: #101214;
+  --el-bg-color-overlay: #22262c;
+  --el-fill-color-blank: #1a1d22;
+  --el-fill-color-light: #22262c;
+  --el-text-color-primary: #e8eaed;
+  --el-text-color-regular: #a8afb9;
+  --el-text-color-secondary: #7d8590;
+  --el-text-color-placeholder: #59616c;
+  --el-border-color: #3a424b;
+  --el-border-color-light: #2b3138;
+  --el-border-color-lighter: #2b3138;
+}

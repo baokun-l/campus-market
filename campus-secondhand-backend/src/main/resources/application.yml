@@ -1,0 +1,311 @@
+# ====================================================================
+# 校园二手集市后端 - 环境配置
+# ====================================================================
+
+server:
+  # ---- ① Web 服务器配置 ----
+  port: 8080
+  servlet:
+    context-path: /api
+  # ★ 优雅停机 ★：收到停机/重启信号后，先不再接收新请求，把在途请求跑完再退出。
+  # 默认是「立即停机」——正在执行的「下单 + 扣库存」「发货 + 写物流轨迹」会被硬切，
+  # 事务随连接断开一起回滚，用户只看到一次不明不白的失败，而日志里连错误都没有。
+  shutdown: graceful
+  tomcat:
+    max-threads: 200
+    accept-count: 50
+    connection-timeout: 20000
+
+spring:
+  # 优雅停机的等待上限：超时仍未结束的请求会被强制终止，
+  # 避免某个卡死的请求让进程永远退不掉（与上面 server.shutdown=graceful 配套）
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+  # ---- 文件上传限制（图片上传接口） ----
+  # 前端已把商品图压到 1200px / JPEG 0.82（约 100~400KB），
+  # 这里给到 5MB 是留余量：真正超过 5MB 的「图片」不是商品图，是原图误传。
+  # 调整这两个值要同步看 app.upload.max-image-bytes 的单图上限，三者口径别打架。
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 10MB
+
+  # ---- 数据源配置（数据访问层底座） ----
+  # 凭据一律走 ${ENV:默认值}：本机/演示直接用默认值，零配置能跑；
+  # 换机器或部署时用环境变量覆盖，不必把口令写进仓库。
+  # 写在 yml 里的默认值只适用于本地开发，别把真实生产口令填在这。
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # ★ createDatabaseIfNotExist=true ★
+    # 库不存在时自动建（MySQL Connector/J 固有参数）。
+    # 不加这个参数会有「鸡生蛋」问题：spring.sql.init 的脚本要靠 DataSource 执行，
+    # 而 DataSource 连的是一个不存在的库 → 连接就失败，脚本根本没机会跑，
+    # 表现为「自动建表没生效」但日志里是一句 connection refused / unknown database。
+    # 字符集由建表语句里的 DEFAULT CHARSET=utf8mb4 保证，不依赖服务器默认值。
+    url: ${DB_URL:jdbc:mysql://localhost:3306/campus_market?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:123456}
+    hikari:
+      maximum-pool-size: 15
+      minimum-idle: 5
+      idle-timeout: 30000
+      max-lifetime: 1800000
+      connection-timeout: 30000
+
+  # ---- 数据库结构自动初始化（建表 + 基础种子）----
+  # ★ 为什么需要它 ★
+  # 原来「建表 + 灌种子」全靠手敲 mysql 命令，步骤多、顺序敏感，
+  # 而且漏跑某一步（尤其 demo-online-seed.sql）会让整站看起来「功能坏了」。
+  # 现在结构与基础种子交给 Spring 在启动时执行，新环境零手工即可登录。
+  #
+  # ★ 为什么不能直接指向 schema.sql ★
+  # schema.sql 是**重建型**脚本（17 张表全是 DROP TABLE IF EXISTS + CREATE TABLE），
+  # 它的用途是「干净重装一个库」，配到这里等于**每次启动清空全库**。
+  # 所以这里指向 schema-auto.sql —— 由 .workbuddy/gen-schema-auto.mjs 从 schema.sql
+  # 派生的非破坏性版本：零 DROP、全部 CREATE TABLE IF NOT EXISTS，
+  # 已有库上每条都是 no-op。改了表结构要重新生成并跑 --check 防漂移。
+  #
+  # ★ 执行顺序 ★ schema-locations（建表）→ data-locations（基础种子）
+  #   → 再叠加 profile 追加的 data-locations（演示数据，见 application-demo.yml）
+  #
+  # ★ 它只建表、不补列 ★ IF NOT EXISTS 对已存在的表整条跳过，
+  #   所以给**老库加列**仍要靠 db/upgrade-online-status.sql 这类增量脚本手工执行。
+  sql:
+    init:
+      # always = 每次启动都执行（默认值 embedded 只对内存库生效，等于不跑）
+      mode: always
+      # 脚本含中文注释与 emoji 图标，编码漏配会变乱码
+      encoding: UTF-8
+      schema-locations: classpath:db/schema-auto.sql
+      data-locations: classpath:db/seed-base.sql
+      # false = 脚本报错就直接让启动失败。宁可起不来，也不要悄悄起一个「表建了一半」的库
+      continue-on-error: false
+
+  # ---- Jackson 配置 ----
+  # date-format 只作用于 java.util.Date；LocalDateTime 走 JSR-310 序列化，
+  # 必须显式关掉 WRITE_DATES_AS_TIMESTAMPS，否则会输出 [2026,9,16,20,0] 数组，
+  # 前端 new Date(createTime) 会解析出错。
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+  # ---- Spring AI 配置 ----
+  # ★ 默认这里是「占位 key + 公网地址」，国内直连 api.openai.com 会连接超时 ★
+  # 实测一次 /ai/chat 会重试到 ~40 秒才失败，远超前端 axios 的 15 秒超时，
+  # 用户先看到「请求超时」而后端还在傻等。
+  #   - max-attempts 压到 1：失败就立刻走 AiAssistantService 的模板降级，不叠加等待；
+  #   - 要用真实 AI：设置环境变量 OPENAI_API_KEY 与 OPENAI_BASE_URL
+  #     （base-url 指向可访问的兼容端点，如国内中转/自建网关）。
+  ai:
+    retry:
+      max-attempts: 1
+    openai:
+      api-key: ${OPENAI_API_KEY:sk-placeholder}
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      chat:
+        options:
+          model: gpt-3.5-turbo
+          temperature: 0.7
+
+# ---- 图片上传配置 ----
+# ★ 为什么商品图必须走「上传拿 URL」，而不是前端把 base64 塞进请求体 ★
+# 原先 Publish.vue 把图片压成 base64 data URL 直接放进 cover / images 提交，
+# 而 t_goods.cover 是 varchar(255)、images 是 text（上限 64KB）——
+# 压缩后的 base64 仍有 100~400KB，插入时 MySQL 直接抛
+# "Data too long for column 'cover'"，被 GlobalExceptionHandler 兜底成
+# 「服务器内部错误，请稍后再试」。表现就是：**只要卖家选了商品图，发布必然失败**。
+# 改成上传落盘后，库里只存 /uploads/2026/09/xxxx.jpg 这样的短路径，
+# 列宽够用、图片可被浏览器缓存、商品列表接口也不必再搬运几百 KB 的 base64。
+app:
+  # ---- 日志落盘目录（滚动/保留策略见 logback-spring.xml）----
+  # 相对路径按「后端进程的工作目录」解析，本地默认落在 uploads/ 旁边的 logs/（已被 .gitignore 忽略）。
+  # 生产用 LOG_DIR 指到源码树之外（见 application-prod.yml），与上传目录同理：
+  # 运行期产物不能和代码放在一起，否则「覆盖式部署」会连它一起换掉。
+  log-dir: ${LOG_DIR:logs}
+
+  upload:
+    # 图片落盘根目录。相对路径按「后端进程的工作目录」解析：
+    # IDEA 里运行就是 campus-secondhand-backend/，命令行 java -jar 则是当前所在目录。
+    # 换机器部署时用环境变量 UPLOAD_DIR 指到持久化盘（如 /data/campus/uploads）。
+    dir: ${UPLOAD_DIR:uploads}
+    # 单张图片字节上限（2MB）。前端压缩产物通常 100~400KB，够用；
+    # 超过就不像是商品图，直接拒绝并给出提示，避免磁盘被塞满。
+    max-image-bytes: ${UPLOAD_MAX_IMAGE_BYTES:2097152}
+
+  # ---- 图片上传闸门 POST /upload/image（P1-10）----
+  # ★ 「单张多大」和「一分钟能传几张」是两件事，缺任何一条另一条都能被绕开 ★
+  # 上限管单张体积，闸门管累计次数：没有闸门时，一个登录账号循环发请求就能在几分钟内
+  # 往上传目录写进几万个文件，把磁盘写满（上传目录是**不可回收的业务数据**，
+  # 见 application-prod.yml 里把它移出源码树的理由）。
+  #   - user-max-uploads   管**公平**：拦住「一个人写脚本」；
+  #   - global-max-uploads 管**容量**：用户维度拦不住「注册 100 个账号各传 9 张」，
+  #     磁盘占用与「是谁在传」无关，这条才是兜住盘的网。
+  # 口径与 app.ai-guard 一致：**配 0 / 负数 = 该维度不限**（缺配置一律放宽，绝不收紧）。
+  # 唯一例外是 window-seconds：配 0 会被收敛到 1 秒 —— 0 毫秒窗口等于「每次请求窗口都刚滑过」
+  # ⇒ 计数永远从 0 开始 ⇒ 闸门静默失效，而配置看起来「只是设小了一点」。
+  # 拒绝时的提示里带上了窗口与限额两个数字，所以改这几个值之后**看响应就能确认是否真的生效**。
+  upload-guard:
+    user-max-uploads: ${UPLOAD_GUARD_USER_MAX_UPLOADS:10}
+    global-max-uploads: ${UPLOAD_GUARD_GLOBAL_MAX_UPLOADS:60}
+    window-seconds: ${UPLOAD_GUARD_WINDOW_SECONDS:60}
+
+  # ---- 健康检查 GET /health（P1-5）----
+  # ★ 探针端点是给监控用的，它的响应时间**必须**有上界 ★
+  # 数据库挂掉时，dataSource.getConnection() 会等连接池的 connectionTimeout
+  # （Hikari 默认 30 秒）。若健康检查同步调用，探针就会挂 30 秒 ⇒ 监控判超时 ⇒
+  # 我们想解决「探针看不出故障」，结果变成「探针自己不可用」。
+  # 所以探测在单线程执行器里跑，并由这里限时：超时就答 DOWN，绝不久等。
+  #   - 下限 200ms（配 0 会让每次探测都必然超时 ⇒ 恒报 DOWN，比不检查更糟）；
+  #   - 2000ms 对本机/内网数据库都很宽裕；跨机房部署可调大。
+  # 状态语义与监控用法见 HealthService / HealthController 类注释。
+  health:
+    db-timeout-ms: ${HEALTH_DB_TIMEOUT_MS:2000}
+
+  # ---- 登录失败闸门（防暴力破解）----
+  # 两个维度各自独立计数，任一维度命中即拒绝（实现与设计理由见 LoginAttemptGuard 类注释）：
+  #   - 账号维度：同一账号在 window-seconds 内累计失败 max-fails 次 → 锁定 lock-seconds；
+  #   - 来源维度：同一来源 IP 在 window-seconds 内累计失败 ip-max-fails 次 → 锁定 ip-lock-seconds。
+  # ★ IP 维度刻意「松阈值 + 短锁定」（可用性优先）★
+  #   校园网/公司出口/反向代理背后是成百上千人共用一个公网地址，阈值定低会变成
+  #   「一个人手滑，整栋楼都登不上」——纯功能性的可用性事故，比它防的风险更常见。
+  #   分工：账号维度拦住「盯着一个账号猛试」的人，IP 维度只负责拦住「脚本撞库」。
+  #   想彻底关掉这条辅网：把 ip-max-fails 调成现实中到不了的大数（如 1000000）。
+  # ★ 课堂演示提示 ★：账号维度 5 次即锁 15 分钟；若演示时要反复展示「密码错误」，
+  #   临时调大 max-fails 或调小 lock-seconds 即可，不必改代码。
+  # ★ 说明 ★：这里全部支持环境变量覆盖；纯内存实现，重启即清零（多实例部署的边界见类注释）。
+  login-guard:
+    max-fails: ${LOGIN_MAX_FAILS:5}
+    window-seconds: ${LOGIN_WINDOW_SECONDS:900}
+    lock-seconds: ${LOGIN_LOCK_SECONDS:900}
+    ip-max-fails: ${LOGIN_IP_MAX_FAILS:100}
+    ip-lock-seconds: ${LOGIN_IP_LOCK_SECONDS:300}
+
+  # ---- AI 助手闸门（长度上限 + 调用频次）----
+  # ★ 为什么必须有这一段 ★
+  # POST /ai/chat 与 POST /ai/generate-description 都要求登录，但「要登录」不等于安全：
+  # 任何一个注册过的学生账号，写一个三行的 for 循环就能把这两个接口打上万次，
+  # 每一次都是一笔真实的 token 支出。闸门之前这两个接口**一处限流都没有**。
+  # 登录管的是「谁在按」，这一段管的是「能按几下」——两件事。
+  #
+  # 频次两个维度各自独立计数，任一命中即拒绝（实现与设计理由见 AiQuotaGuard 类注释）：
+  #   - 用户维度：单个账号在 window-seconds 内最多 user-max-calls 次 → 管**公平**，
+  #     拦的是「一个人写脚本 / 反复点按钮」；
+  #   - 全站维度：全站同一窗口内最多 global-max-calls 次 → 管**钱**，
+  #     费用按调用次数产生、与是谁在调无关，用户维度拦不住「注册 100 个账号各调 29 次」。
+  # ★ 0 / 负数 = 该维度不限（不是「一次就锁」）★ —— 沿用本仓「缺配置一律放宽」的口径，
+  #   课堂演示想连点几次而不等窗口，把 user-max-calls 配 0 即可，不必改代码。
+  #   唯一例外是 window-seconds：配 0 会被收敛到 1 秒（0 毫秒窗口意味着计数永远从 0 开始
+  #   ⇒ 闸门静默失效，而配置看起来只是「设小了一点」）。
+  # ★ 长度上限的默认值不是随手取的 ★
+  #   - max-title-length 200 对齐 t_goods.title VARCHAR(200)：库能存下的就能发给 AI；
+  #   - max-message-length 200 对齐前端 AiAssistant.vue 输入框的 maxlength="200"：
+  #     界面能打出来的都一定能过，不会被后端拒掉；
+  #   - 超长一律**报错**（1001）而不是静默截断 —— 截断会让用户拿到一段忽略了他后半句的
+  #     AI 结果，且无从知道原因。
+  # ★ 说明 ★：纯内存实现，重启即清零；多实例部署时每实例各算各的（边界同 LoginAttemptGuard）。
+  ai-guard:
+    user-max-calls: ${AI_GUARD_USER_MAX_CALLS:30}
+    global-max-calls: ${AI_GUARD_GLOBAL_MAX_CALLS:300}
+    window-seconds: ${AI_GUARD_WINDOW_SECONDS:600}
+    max-title-length: ${AI_GUARD_MAX_TITLE_LENGTH:200}
+    max-keywords-length: ${AI_GUARD_MAX_KEYWORDS_LENGTH:200}
+    max-message-length: ${AI_GUARD_MAX_MESSAGE_LENGTH:200}
+
+  # ---- 商品自动下架（定时维护）----
+  # ★ 为什么要有这一段 ★
+  # t_settings.auto_offline_days 原本是**死配置**：后台能改、界面能看，但全仓没有任何
+  # @Scheduled（grep 命中 0），因此改多少天都不会有商品被下架 —— 管理员以为自己管住了，
+  # 其实没有。这里把它接上：每天凌晨扫一遍「在售且发布超过 N 天」的商品并下架。
+  #   - N 取自 t_settings.auto_offline_days，**0 / NULL = 不自动下架**（缺配置放宽，绝不收紧）；
+  #   - cron 默认 03:30：清理陈货以天为单位，跑勤无收益；且避开演示与高峰，
+  #     批量改状态期间会锁行，白天跑容易撞上下单/改价；
+  #   - offline-enabled=false 时任务 Bean 根本不创建（连 @Scheduled 都不注册），
+  #     演示/排障想彻底停掉它，改配置即可，不必改代码；
+  #   - 另有管理员手工入口（GET 预览 / POST 执行 /admin/goods/auto-offline），
+  #     用于「改完配置当场验证」，不必等到凌晨。
+  # ★ 课堂演示提示 ★：演示商品发布时间都在 15 天以内，默认 30 天时这条任务是**空跑**，
+  #   不会动任何数据；想当场演示效果，把后台设置里的「自动下架天数」改成 3 再点手工执行。
+  goods-maintenance:
+    offline-enabled: ${GOODS_AUTO_OFFLINE_ENABLED:true}
+    offline-cron: ${GOODS_AUTO_OFFLINE_CRON:0 30 3 * * ?}
+
+# ---- ③ Spring MVC 配置（自定义拦截器注册在 WebMvcConfig 中） ----
+# ---- ④ MyBatis-Plus 数据访问层配置 ----
+mybatis-plus:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.campus.market.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    # ★ 单条 SQL 的执行上限（秒）★：默认不限时，一条走错索引的慢查询会把 Hikari 的
+    # 15 个连接逐个占死，最终整个服务连不上库（表现为全线 500，但错误日志指向连接超时，
+    # 根因在几百行之前）。这里设 20 秒 —— 本项目所有查询都在毫秒级，20 秒只可能是异常。
+    default-statement-timeout: 20
+    # 打印真实 SQL：课程演示时便于在控制台看到「分页被改写成 LIMIT」「动态 SQL 拼成什么样」。
+    # ★ 必须走 Slf4j 而不是 StdOutImpl ★：StdOutImpl 会**无视日志级别**把所有 SQL
+    # （含手机号、收货地址等参数）一律打到标准输出，无法在部署时关掉。
+    # 走 Slf4j 后由下面的 logging.level 控制，生产环境把 com.campus.market.mapper 降为 info 即可。
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: auto
+      # ★ 这里原有一行 logic-delete-field: deleted，已删除 —— 它是个「死配置 + 地雷」：
+      #   schema.sql 里根本没有任何 deleted 列，实体类也没有该字段，所以它当前完全不生效
+      #   （商品删除走的是物理删除）。而一旦有人给某个实体加上 deleted 字段，
+      #   MyBatis-Plus 会立刻开始给所有查询拼 WHERE deleted = 0，那张表的查询会集体变成空集，
+      #   报错信息还指向不到这里 —— 排查成本极高。
+      #   若将来真要启用逻辑删除，必须「加列 + 加字段 + 取消这行注释」三件事一起做。
+
+# ---- JWT 配置 ----
+# secret 至少 32 字节（HS256 要求），且必须支持环境变量覆盖：
+# 密钥一旦泄露，任何人都能自己签发一个 role=admin 的 token 直接进后台。
+jwt:
+  secret: ${JWT_SECRET:campus-secondhand-market-jwt-secret-key-2024}
+  # 24 小时。注意 token 签发后服务端改不动它，所以封禁/降权要靠拦截器回查 t_user 兜底
+  expiration: ${JWT_EXPIRATION:86400000}
+
+# ---- 接口文档（springdoc / Swagger UI）----
+# ★ 地址要带上下文路径 /api ★（server.servlet.context-path=/api 会加在最前面）：
+#     Swagger UI   http://localhost:8080/api/swagger-ui/index.html
+#     OpenAPI JSON http://localhost:8080/api/v3/api-docs
+#   写文档/答辩时贴地址最容易漏掉 /api，贴出去的链接点开就是 404。
+#
+# ★★ 两个 enabled 开关做成环境变量，而不是"部署时记得改 yml" ★★
+#   接口文档会把每个端点的路径、参数、错误码列全 —— 对攻击者是**免费的侦察资料**。
+#   本地开发与课堂演示需要它；**生产部署必须关掉**：
+#     SPRINGDOC_API_DOCS_ENABLED=false
+#     SPRINGDOC_SWAGGER_UI_ENABLED=false
+#   这与"demo profile 是重置型"属于同一类风险：靠机制，不靠"记得"。
+#   （AuthInterceptor 里对 /swagger-ui/**、/v3/api-docs 放行的是 GET，
+#     所以即使忘了关，最坏也只是"可读"而非"可改"。）
+springdoc:
+  api-docs:
+    enabled: ${SPRINGDOC_API_DOCS_ENABLED:true}
+  swagger-ui:
+    enabled: ${SPRINGDOC_SWAGGER_UI_ENABLED:true}
+    # 默认按字母序排接口，分组看起来是乱的；按 HTTP 方法排更接近"读接口"的习惯
+    operations-sorter: method
+    tags-sorter: alpha
+  # 只扫本项目自己的控制器：不限定的话，Spring Boot 内置的 /error 之类也会被列进文档
+  packages-to-scan: com.campus.market.controller
+
+# ---- 跨域配置 ----
+# ★ 这里是「来源模式」不是精确来源（WebMvcConfig 用 allowedOriginPatterns 消费）★
+# localhost 与 127.0.0.1 对浏览器是不同来源，必须都放行；用 * 兜住任意端口变体
+cors:
+  allowed-origins: http://localhost:*,http://127.0.0.1:*,http://localhost:3000
+  allowed-methods: GET,POST,PUT,DELETE,PATCH,OPTIONS
+
+# ---- 日志配置 ----
+# ★ 级别不能再整体开到 debug ★：应用自身的 DEBUG 日志里会带上手机号、收货地址等 PII，
+# 而 StdOutImpl 时代这些其实是无视级别强打的（已改为 Slf4jImpl，见上面的 log-impl）。
+# 现在只把 mapper 包留在 debug —— 目的单一：答辩/演示时能看见真实 SQL。
+# 部署到真实环境时，把 com.campus.market.mapper 也改成 info 即可关闭 SQL 回显。
+logging:
+  level:
+    com.campus.market: info
+    com.campus.market.mapper: debug
+    org.springframework.web: info

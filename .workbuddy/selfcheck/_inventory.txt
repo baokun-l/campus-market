@@ -1,0 +1,167 @@
+﻿D:\campus-sql\bin-check.txt | 505 | 09/18/2026 09:40:47
+D:\campus-sql\buildtest-summary.txt | 125 | 09/18/2026 09:43:58
+D:\campus-sql\buildtest.txt | 4000 | 09/18/2026 09:43:41
+D:\campus-sql\cleanup-dangling.txt | 116 | 09/18/2026 09:40:08
+D:\campus-sql\cleanup_probe.sql | 432 | 09/18/2026 08:49:51
+D:\campus-sql\db-state.txt | 1062 | 09/18/2026 09:39:28
+D:\campus-sql\demo-data-orders.sql | 23689 | 09/17/2026 09:50:56
+D:\campus-sql\demo-data.sql | 12009 | 09/17/2026 08:45:31
+D:\campus-sql\env-check.txt | 238 | 09/18/2026 09:21:42
+D:\campus-sql\fix_zhangsan_password.sql | 973 | 09/18/2026 08:40:57
+D:\campus-sql\goods-status.txt | 290 | 09/18/2026 09:36:31
+D:\campus-sql\health.txt | 57 | 09/18/2026 09:34:59
+D:\campus-sql\java-cmdline.txt | 18045 | 09/18/2026 09:33:23
+D:\campus-sql\port-check.txt | 36 | 09/18/2026 09:11:22
+D:\campus-sql\port-now.txt | 19 | 09/18/2026 09:34:27
+D:\campus-sql\port8080-owner.txt | 437 | 09/18/2026 09:23:55
+D:\campus-sql\probe-p18.txt | 11334 | 09/18/2026 09:38:18
+D:\campus-sql\probes.txt | 25288 | 09/18/2026 09:32:36
+D:\campus-sql\probes2.txt | 27674 | 09/18/2026 09:35:28
+D:\campus-sql\reseed.txt | 950 | 09/18/2026 09:37:47
+D:\campus-sql\selfcheck-static.exit.txt | 11 | 09/18/2026 09:30:26
+D:\campus-sql\selfcheck-static.md | 4227 | 09/18/2026 09:31:36
+D:\campus-sql\selfcheck-static.out.txt | 5258 | 09/18/2026 09:31:36
+D:\campus-sql\stop-old.txt | 12 | 09/18/2026 09:34:05
+D:\campus-sql\t2-check.txt | 510 | 09/18/2026 09:22:31
+D:\campus-sql\t_activity.sql | 2081 | 09/18/2026 08:32:32
+D:\campus-sql\write-test.txt | 7 | 09/18/2026 08:31:51
+---WS---
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\ai-dts.txt | 74
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\api-verify.txt | 530
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\backend-restart-verify.txt | 481
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\backend-run.log | 155021
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\backend-start.txt | 35
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\backend-stderr.log | 0
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\backend-stdout.log | 0
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\backend-tail.txt | 30
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\be-run.log | 3393
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\be-run2.log | 106360
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\be-run3.log | 99990
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\be-run4.log | 99126
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\be-run5.log | 27887
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\be-run6.log | 28837
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\be-run7.log | 123800
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\be-user-test.log | 2787
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\build-compile.log | 1007
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\build-compile2.log | 1093
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\build-final.log | 2644
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\build-final2.log | 2644
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\build-final3.log | 2644
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\build-final4.log | 2644
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\build-package.log | 2644
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\build-package2.log | 3644
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\build-package3.log | 2644
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\build-verify.log | 2644
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\build-verify2.log | 2644
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\charset-body.json | 698
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\charset-headers.txt | 203
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\compare-final.txt | 5646
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\compare-result.txt | 5646
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\compare-result2.txt | 5646
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\compare.log | 5
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\compare2.log | 5
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\db-check.txt | 53
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\db-probe.txt | 655
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\db-tables.txt | 267
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\detail-anon-probe.txt | 487
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\diag-order.mjs | 2402
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\e2e-activities.log | 4679
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\e2e-activities.mjs | 18354
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\e2e-check-rerun.txt | 2163
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\e2e-check.mjs | 11778
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\e2e-deep.mjs | 12562
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\e2e-p1-8-orders.mjs | 27371
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\e2e-proxy-rerun.txt | 2432
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\e2e-proxy.mjs | 7359
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\env-list.txt | 2334
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fe-build.log | 94423
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fe-build2.log | 94423
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fe-diff.txt | 388
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fe-diff2.txt | 454
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fe-diff3.txt | 91
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fe-probe.txt | 484
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fe-test.log | 3812
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fe-tsc-t2.log | 0
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fe-tsc-tail.txt | 131
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fe-tsc.log | 0
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fe-tsc2.log | 345
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fe-tsc3.log | 0
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fe-vitest-tail.txt | 63
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fe-vitest.log | 103016
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\fetch-dep.log | 106709
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\health-now.txt | 2665
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\idea-probe.txt | 1153
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\jar-after-build.txt | 377
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\jar-freshness.txt | 824
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\java-cmdline.txt | 57108
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\java-files.txt | 22
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\login-check.mjs | 1156
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\m2-probe.txt | 1916
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\maven-d-probe.txt | 660
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\maven-d2.txt | 1024
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\maven-probe.txt | 1003
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\maven-verify.txt | 837
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\mem-size.txt | 24
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\mem-tail.txt | 1084
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\mvn-aliyun-settings.xml | 2275
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\mvn-build-d-out.txt | 61
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\mvn-build-d.log | 2873
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\mvn-build-new.log | 2881
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\mvn-build.log | 5396
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\mvn-build2.log | 4040
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\mvn-result.txt | 25
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\mvn-test-result.txt | 1453
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\mvn-test.log | 5537
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\mysql-identity.txt | 184
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\mysql-locate.txt | 500
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\port-check.txt | 18
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\ports.txt | 32836
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\probe-statuses.mjs | 2255
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\probe-users-goods.txt | 1942
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\proc-state.txt | 271
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\proxy-probe.txt | 567
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\scripts.txt | 105
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\seed-orders-out.txt | 644
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\seed-verify.txt | 292
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\sibling.txt | 860
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\statuses-probe.txt | 289
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\sync-fe.txt | 63
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\sync-fe2.txt | 31
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\tsc-task2.log | 0
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\tsc-task3.log | 0
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\vetsc.txt | 0
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\vite-dev.log | 2589
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\vite-dev2.log | 2589
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\vite-dev3.log | 2589
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_5173home.html | 597
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_5173main.ts | 4264
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_5174.txt | 1188
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_5174home.html | 597
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_8080proc.txt | 9572
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_body.json | 45
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_c1.txt | 471
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_c1code.txt | 5
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_dirs.txt | 2323
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_ebs_files.txt | 1361
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_goods.txt | 5288
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_goods_head.txt | 5293
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_home.html | 597
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_home5174.html | 597
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_home5174.txt | 305
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_idea_local.txt | 377
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_idea_local_projects.txt | 183
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_idea_proc.txt | 14
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_idea_projects.txt | 351
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_javaproc.txt | 77
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_jdkcheck.txt | 92
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_login.txt | 71
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_login2.txt | 84
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_login3.txt | 499
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_login4.txt | 499
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_login5.txt | 42
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_ports.txt | 100
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\_proc.txt | 139
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\memory\2026-09-16.md | 34139
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\memory\2026-09-17.md | 35295
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\memory\MEMORY.md | 7713
+C:\Users\刘宝杰\Desktop\软件开发项目实践\软件开发\实践任务3：后端开发(前后端分离)\.workbuddy\selfcheck\static-check.mjs | 19142

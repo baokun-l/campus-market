@@ -1,0 +1,15 @@
+# ====================================================================
+# Spring Boot 扩展点注册
+# ====================================================================
+# DeploymentGuard 必须在**容器创建之前**跑，才能挡住 spring.sql.init 的重置型脚本
+# （demo profile 会 DELETE 掉 t_goods / t_category 再重灌演示数据）。
+#
+# ★★ 这个文件的名字不能改 ★★
+# Spring Boot 3.x 把「自动配置类」迁移到了 META-INF/spring/AutoConfiguration.imports，
+# 但 EnvironmentPostProcessor **仍然只认 spring.factories** ——
+# 写成 imports 文件不会报错、也不会生效，护栏会静默失效。
+# 这是本项目里最危险的一类失败：看起来配了，其实没跑。
+# ====================================================================
+
+org.springframework.boot.env.EnvironmentPostProcessor=\
+com.campus.market.config.DeploymentGuard
