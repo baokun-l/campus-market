@@ -189,9 +189,16 @@ if (mode === 'baseline') {
   const since = process.argv[3];
   const until = process.argv[4] || '9999-12-31 23:59:59';
   if (!since) {
-    console.error('用法：assert "YYYY-MM-DD HH:MM:SS" ["YYYY-MM-DD HH:MM:SS"]');
+    console.error('用法：assert "YYYY-MM-DD HH:MM:SS" ["YYYY-MM-DD HH:MM:SS"] [AFTER|FALSIFY|…]');
     console.error('  第二个参数是可选上界 —— ★ 它的用处是「把同一套判据指向修前的日志段」，');
     console.error('  那一跑**必须报红**。判据改完不证明它还能红，就等于没修（只是从假红换成了恒真）。');
+    console.error('  第三个参数是证据文件标签（默认 AFTER）—— 两次跑各写各的，别互相覆盖：');
+    console.error('  留档撒谎（名叫 AFTER 的文件里装着 BEFORE 的内容）比没有留档更坏。');
+    console.error('');
+    console.error('  ★★ 窗口必须**收在一次验证会话之内**（一台后端 + 夹具存活的那段）★★');
+    console.error('  本脚本的 ④ 是「最后一轮的 checked == 第一轮的 paying 段 + closed 段」，');
+    console.error('  而夹具在会话结束后会被删掉：窗口一旦跨到「夹具已清理」的时段，');
+    console.error('  后半段的 checked 天然少 1 ⇒ 报出一个与实现无关的假红（本轮真踩过）。');
     process.exit(2);
   }
   const all = fs.readFileSync(LOG, 'utf8').split(/\r?\n/);
@@ -282,13 +289,23 @@ if (mode === 'baseline') {
     s.controls.split('\n').map((l) => l.split('\t').join('  |  ')).join('\n      '));
 
   fs.mkdirSync(EVID, { recursive: true });
-  fs.writeFileSync(path.join(EVID, 'closed-lookback-AFTER.txt'),
-    ['# 修后证据（新 jar，含 closed 候选回看窗口）', '', '起始时刻：' + since, '',
-      '## 候选查询（应有两条：closed 段含 update_time；paying 段含 expire_at）', '```',
+  /*
+   * ★ 证据文件名必须能区分「哪一次跑出来的」★
+   * 早先这里固定写 closed-lookback-AFTER.txt，于是紧接着那次「指向修前日志的假红跑」
+   * 把它覆盖成了修前内容 —— 一个名叫 AFTER 的文件里装着 BEFORE 的东西。
+   * 留档撒谎比没有留档更坏，所以标签由调用方给（AFTER / FALSIFY / …）。
+   */
+  const label = (process.argv[5] || 'AFTER').toUpperCase();
+  fs.writeFileSync(path.join(EVID, `closed-lookback-${label}.txt`),
+    ['# 证据（' + label + '）', '',
+      '- 窗口：' + since + '  →  ' + until,
+      '- 起始时刻（后端启动）：' + since,
+      '',
+      '## 候选查询（应能分辨两段：闭合段含 update_time；paying 段含 expire_at）', '```',
       ...prepping.map((l) => l.trim()), '```', '',
-      '## 闸门日志（A 在、B 不在）', '```',
+      '## 闸门日志（reconciling a CLOSED payment）', '```',
       ...closedWarn.map((l) => l.trim()), '```', '',
-      '## 每轮收尾', '```',
+      '## 每轮收尾（checked/settled/…）', '```',
       ...finishing.map((l) => l.trim()), '```', ''].join('\n'), 'utf8');
 
   for (const c of checks) {
