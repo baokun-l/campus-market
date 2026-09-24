@@ -26,6 +26,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -92,6 +93,7 @@ class PaymentServiceReconcileTest {
         ReflectionTestUtils.setField(props, "closeBatchSize", 200);
         ReflectionTestUtils.setField(props, "reconcileBatchSize", 100);
         ReflectionTestUtils.setField(props, "reconcileGraceMinutes", 2);
+        ReflectionTestUtils.setField(props, "reconcileLookbackMinutes", 10);
 
         service = new PaymentService(paymentMapper, orderMapper, userMapper, registry, props, orderService);
         ReflectionTestUtils.setField(service, "instanceId", 0);
@@ -120,6 +122,20 @@ class PaymentServiceReconcileTest {
         when(ch.query(anyString())).thenReturn(result);
         when(registry.find(CHANNEL)).thenReturn(ch);
         return ch;
+    }
+
+    /**
+     * 一张**已被超时关单任务关掉**的支付单：12.00 元，已过期，关单时刻在回看窗口内。
+     * <p>
+     * 这正是「用户到期前最后一两分钟付了款、通知始终不来」留下的那笔。
+     */
+    private Payment closedPayment() {
+        Payment p = payingPayment();
+        p.setStatus(Payment.STATUS_CLOSED);
+        p.setExpireAt(LocalDateTime.now().minusMinutes(3));
+        // 关单任务写 closed 时，update_time 由 DDL 的 ON UPDATE CURRENT_TIMESTAMP 顶到关单时刻
+        p.setUpdateTime(LocalDateTime.now().minusMinutes(3));
+        return p;
     }
 
     private static PayChannel.QueryResult paid(String amount) {
@@ -244,12 +260,69 @@ class PaymentServiceReconcileTest {
     }
 
     /* ============================================================
+     * ★★★ closed 也允许对账：关单之后那段真空期的兜底
+     *
+     * 背景：用户在到期前最后一两分钟付款、通知始终不来 ⇒ 超时关单任务把支付单
+     * 写成 closed、订单写成 cancelled。此前这段没有任何人管（closed 不在候选里，
+     * 且 reconcileOne 的闸门只认 paying），那笔钱就成了一笔无痕的进账。
+     * 这一组用例钉住的正是「这条真空期被补上了」，以及「补上之后也没有变宽」。
+     * ============================================================ */
+
+    @Test
+    @DisplayName("★★★ 已关单的支付单：渠道确认收款且金额相符 → 结算；订单已作废 ⇒ 原路退回（钱必须有归宿）")
+    void closedPaymentIsReconciledThenAutoRefunded() {
+        when(paymentMapper.selectById(PAY_ID)).thenReturn(closedPayment());
+        when(paymentMapper.update(any(), any(LambdaUpdateWrapper.class))).thenReturn(1);
+        // 订单已被超时关单任务置成 cancelled ⇒ markPaid 必然返回 false
+        when(orderService.markPaid(ORDER_ID, CHANNEL)).thenReturn(false);
+        PayChannel ch = queryableChannel(paid("12.00"));
+        when(ch.refundable()).thenReturn(true);
+        when(ch.refund(any(PayChannel.RefundContext.class)))
+                .thenReturn(PayChannel.RefundResult.ok("RF-1", "ok"));
+
+        /*
+         * ★ 判据是「真的走完了 settle 全程」，而不是「没抛异常」★
+         * 把 reconcileOne 的 closed 分支回退掉时本用例必须报红，且红线在下面两处：
+         *   - 返回值退化成 SKIPPED；
+         *   - markPaid 一次都不会被调用（闸门在结算之前就把这笔拦下了）。
+         * 两个断言各自独立，任一处红都说明能力真的被拆掉了。
+         */
+        assertEquals(PaymentService.ReconcileOutcome.SETTLED, service.reconcileOne(PAY_ID));
+        verify(orderService, times(1)).markPaid(ORDER_ID, CHANNEL);
+        verify(ch, times(1)).refund(any(PayChannel.RefundContext.class));
+    }
+
+    @Test
+    @DisplayName("★★ 已关单的支付单查出「渠道说还没成」→ 一毫不改（不许把已关单标失败、也不许改状态）")
+    void closedPaymentChannelSaysUnpaidIsLeftUntouched() {
+        when(paymentMapper.selectById(PAY_ID)).thenReturn(closedPayment());
+        queryableChannel(new PayChannel.QueryResult(PayChannel.QueryOutcome.NOT_PAID, PAY_ID,
+                null, null, "TRADE_CLOSED", "支付宝交易状态：TRADE_CLOSED"));
+
+        assertEquals(PaymentService.ReconcileOutcome.NOT_PAID, service.reconcileOne(PAY_ID));
+        verify(paymentMapper, never()).update(any(), any(LambdaUpdateWrapper.class));
+        verify(orderService, never()).markPaid(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("★★ 已关单但渠道不支持查单 → 跳过，且一次渠道请求都不许发（放宽闸门没有开出新的洞）")
+    void closedPaymentOnNonQueryableChannelIsSkipped() {
+        when(paymentMapper.selectById(PAY_ID)).thenReturn(closedPayment());
+        PayChannel ch = mock(PayChannel.class);
+        when(ch.queryable()).thenReturn(false);
+        when(registry.find(CHANNEL)).thenReturn(ch);
+
+        assertEquals(PaymentService.ReconcileOutcome.SKIPPED, service.reconcileOne(PAY_ID));
+        verify(ch, never()).query(anyString());
+    }
+
+    /* ============================================================
      * 候选筛选：谁值得被问
      * ============================================================ */
 
     @Test
-    @DisplayName("★ 候选查询必须带「未过期」与「已过宽限期」两个条件（否则会与关单任务抢单、或追问刚发起的支付）")
-    void candidateQueryCarriesBothTimeConditions() {
+    @DisplayName("★★ 两段候选的时间窗都必须落在 SQL 里（paying 段限未过期+宽限期；closed 段限关单时刻回看窗口）")
+    void candidateQueriesCarryBothTimeWindows() {
         when(paymentMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
 
         service.findReconcileCandidates();
@@ -257,18 +330,57 @@ class PaymentServiceReconcileTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<LambdaQueryWrapper<Payment>> captor =
                 ArgumentCaptor.forClass(LambdaQueryWrapper.class);
-        verify(paymentMapper).selectList(captor.capture());
-        String sql = captor.getValue().getSqlSegment();
+        verify(paymentMapper, times(2)).selectList(captor.capture());
 
         /*
          * ★ 断言的是**生成出来的 SQL 片段**，不是「我们调用了 selectList」★
          * 后者在条件被整段删掉时照样通过 —— 而这正是最危险的改法：
-         * 少了 expire_at 就会去问已过期的单子（与关单任务抢），
-         * 少了 create_time 宽限就会把「用户正在付款」误判成「回调可能丢了」。
+         * 少了 expire_at 就会去问已过期的单子（与关单任务抢）；
+         * 少了 create_time 宽限就会把「用户正在付款」误判成「回调可能丢了」；
+         * 少了 update_time 回看窗口，新补的 closed 段就整个失效 —— 而且它**不会报错**，
+         * 只是永远选不到候选（静默退化，本项目最忌惮的形态）。
+         * ★ 用 SQL 内容区分两段，而不是靠调用次序 ★ —— 次序是优先级实现细节，
+         *   靠它定位会让「无害的顺序调整」也变成红灯。
          */
-        assertTrue(sql.contains("status"), "必须只看 paying：" + sql);
-        assertTrue(sql.contains("expire_at"), "必须限定未过期，已过期的归超时关单任务：" + sql);
-        assertTrue(sql.contains("create_time"), "必须有宽限期，别追问刚发起的支付：" + sql);
+        String closedSql = null;
+        String openSql = null;
+        for (LambdaQueryWrapper<Payment> q : captor.getAllValues()) {
+            String sql = q.getSqlSegment();
+            if (sql.contains("update_time")) {
+                closedSql = sql;
+            } else if (sql.contains("expire_at")) {
+                openSql = sql;
+            }
+        }
+
+        assertNotNull(closedSql,
+                "必须有一条按关单时刻限窗口的 closed 候选查询；实际抓到的：" + captor.getAllValues().size());
+        assertNotNull(openSql,
+                "必须有一条按未过期限定的 paying 候选查询；实际抓到的：" + captor.getAllValues().size());
+
+        // paying 段：状态 + 未过期 + 宽限期
+        assertTrue(openSql.contains("status"), "paying 段必须限定状态：" + openSql);
+        assertTrue(openSql.contains("create_time"), "paying 段必须有宽限期，别追问刚发起的支付：" + openSql);
+
+        // closed 段：状态 + 关单时刻下界
+        assertTrue(closedSql.contains("status"), "closed 段必须限定状态：" + closedSql);
+        assertTrue(closedSql.contains(">="), "closed 段必须是含边界的下界（>=），否则边界那一刻会漏：" + closedSql);
+    }
+
+    @Test
+    @DisplayName("★ 「刚被关掉」的候选排在「还在等结果的」之前（短窗口更稀缺，不能被长窗口挤掉）")
+    void justClosedCandidatesComeFirst() {
+        Payment closed = closedPayment();
+        Payment open = payingPayment();
+        open.setId("pay_20260923233755539001");
+        // 第一段（closed）拿到 closed，第二段（paying）拿到 open
+        when(paymentMapper.selectList(any(LambdaQueryWrapper.class)))
+                .thenReturn(List.of(closed), List.of(open));
+        PayChannel ch = mock(PayChannel.class);
+        when(ch.queryable()).thenReturn(true);
+        when(registry.find(CHANNEL)).thenReturn(ch);
+
+        assertEquals(List.of(PAY_ID, "pay_20260923233755539001"), service.findReconcileCandidates());
     }
 
     @Test

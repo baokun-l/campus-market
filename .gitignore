@@ -13,6 +13,11 @@
 # ---------- .workbuddy：备份 / 临时 / 日志 ----------
 .workbuddy/bak-*/
 .workbuddy/tmp/
+# 红绿探针的「留底」：只在被 SIGTERM 打断时留着，供下一次运行自愈，跑完即删。
+# 属运行产物而非脚本，不进库 —— 但它必须存在，否则探针被硬杀后突变会留在源码里。
+.workbuddy/.redgreen-backup/
+# 逐轮真机证据摘录（*.txt，与 *.log 同类）：结论已写进「项目缺陷检查与修复清单.md」，这里只是过程留档
+.workbuddy/evidence/
 .workbuddy/bak-full-*.sql
 .workbuddy/**/*.log
 .workbuddy/*.log

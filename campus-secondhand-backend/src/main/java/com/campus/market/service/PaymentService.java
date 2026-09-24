@@ -27,8 +27,10 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 支付服务：支付单的生命周期，以及「钱到账 → 订单推进」这一段唯一的结算路径。
@@ -652,18 +654,38 @@ public class PaymentService {
      * <p>
      * ★★ 这个方法回答的是「哪些订单可能已经付了钱、而我们不知道」★★
      * <p>
-     * 入选条件三条，缺一不可：
+     * ★★★ 候选分两类，各自覆盖支付单生命周期的一段，各自带自己的时间窗 ★★★
      * <ol>
-     *   <li>{@code status = 'paying'}：只有这个状态代表「已把用户送去收银台、结果未知」。
-     *       {@code created} 还没送出去，{@code success/closed/failed/refunded} 都已有结论；</li>
-     *   <li>{@code expire_at > now}：<b>已过期的交给超时关单任务，不在这里抢</b>。
-     *       两个任务同时处理同一笔会在「关单」与「入账」之间形成难以复现的竞态，
-     *       而这类竞态的后果是钱；边界必须清晰 —— 未过期归对账，已过期归关单，
-     *       而「关单之后才到的付款」由 {@link #settle} 的自动退回兜住；</li>
-     *   <li>{@code create_time < now - 宽限期}：见
-     *       {@link PayProperties#getReconcileGraceMinutes()}，避免把「用户正在付款」
-     *       误当成「回调可能丢了」。</li>
+     *   <li><b>还在等结果的</b>：{@code status = 'paying'} + {@code expire_at > now}
+     *       + {@code create_time < now - 宽限期}。这一段的含义是「已把用户送去收银台、
+     *       结果未知」；{@code created} 还没送出去，{@code success/failed/refunded}
+     *       是真终态，都不在这里。
+     *       <b>已过期的交给超时关单任务，不在这里抢</b> —— 两个任务同时处理同一笔
+     *       会在「关单」与「入账」之间形成难以复现的竞态，而这类竞态的后果是钱。
+     *       边界必须清晰：<b>未过期归对账，已过期归关单</b>；</li>
+     *   <li><b>刚被关掉的</b>：{@code status = 'closed'} +
+     *       {@code update_time >= now - 回看窗口}。
+     *       ★ 这一类补的正是上面那条边界留下的真空期 ★
+     *       关单只代表「我们不再等了」，**不代表「这笔没成」**：用户在到期前最后
+     *       一两分钟付款、而通知始终不来时，关单任务会把支付单写成 {@code closed} ——
+     *       于是这笔钱既不在「未过期候选」里（它已过期），也不是任何人的待办。
+     *       窗口与默认值的取舍见
+     *       {@link PayProperties#getReconcileLookbackMinutes()}。
+     *       <p>
+     *       关单时刻用 {@code update_time} 当锚，它由 DDL 的
+     *       {@code ON UPDATE CURRENT_TIMESTAMP} 在关单那一次 UPDATE 时写定；
+     *       全仓没有 MyBatis-Plus 的自动填充处理器（没有 {@code MetaObjectHandler}），
+     *       所以这个锚**依赖建表语句里的那一句**，见 {@code t_payment} 建表语句。
+     *       改 DDL 时把这一句去掉，本类会静默退化成一个永远选不到候选的分支 ——
+     *       不报错、不打日志，只是钱又要靠那条不保证到达的通知。</li>
      * </ol>
+     * <p>
+     * ★ 顺序：先「刚被关掉的」，再「还在等结果的」★
+     * 两类的可取数都受同一个批大小限制，而<b>窗口长度差了两个数量级</b>：
+     * 回看窗口只有分钟级，{@code paying} 那类能撑到 {@code expire_at}（默认 24 小时）。
+     * 若渠道长时间不可用造成积压，先跑长窗口那一类会把批大小用光，
+     * 于是短窗口的候选「还没轮到就已经出窗」—— 这种错过是**不可挽回**的；
+     * 而长窗口那类晚一轮再问完全无害。先处理稀缺的那一类。
      * <p>
      * ★ 渠道筛选放在这里而不是 SQL 里 ★
      * SQL 不知道哪条渠道支持查单。不用「调一下 query 试试」那种探测式判断
@@ -672,33 +694,73 @@ public class PaymentService {
      * {@code paying} 的行，所以这个筛选通常是空转 —— 但它必须存在：
      * 将来新增一条「同步创建、异步结果」的渠道时，这里不会把它错当成可查单的渠道。
      *
-     * @return 待对账的支付单号，按建单时间从早到晚
+     * @return 待对账的支付单号，两段各自按时间从早到晚；同一单只出现一次
      */
     public List<String> findReconcileCandidates() {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime createdBefore = now.minusMinutes(Math.max(1, props.getReconcileGraceMinutes()));
+        LocalDateTime closedAfter = now.minusMinutes(Math.max(1, props.getReconcileLookbackMinutes()));
+        int limit = Math.max(1, props.getReconcileBatchSize());
 
-        List<Payment> rows = paymentMapper.selectList(new LambdaQueryWrapper<Payment>()
+        /*
+         * ★ 为什么拆成两条查询，而不是并在一条 OR 里 ★
+         * 两类候选的判据落在不同的列上（paying 看 expire_at，closed 看 update_time），
+         * 并在一条 OR 里会让优化器用不上任何一条「等值列 + 时间列范围」索引
+         * （t_payment 上有 idx_payment_status_expire(status, expire_at)），退化成全表扫。
+         * 拆开之后每一类还能各自带 LIMIT —— 批大小约束的是**对渠道的请求数**，
+         * 不是行数，所以两条各自限流才是它真正的语义。
+         * ★ 顺序即优先级：先稀缺的短窗口，再长窗口（理由见方法注释）★
+         */
+        List<Payment> justClosed = paymentMapper.selectList(new LambdaQueryWrapper<Payment>()
+                .eq(Payment::getStatus, Payment.STATUS_CLOSED)
+                .ge(Payment::getUpdateTime, closedAfter)
+                .orderByAsc(Payment::getUpdateTime)
+                .last("LIMIT " + limit));
+
+        List<Payment> stillOpen = paymentMapper.selectList(new LambdaQueryWrapper<Payment>()
                 .eq(Payment::getStatus, Payment.STATUS_PAYING)
                 .isNotNull(Payment::getExpireAt)
                 .gt(Payment::getExpireAt, now)
                 .lt(Payment::getCreateTime, createdBefore)
                 .orderByAsc(Payment::getCreateTime)
-                .last("LIMIT " + Math.max(1, props.getReconcileBatchSize())));
+                .last("LIMIT " + limit));
 
-        List<String> out = new ArrayList<>();
-        for (Payment p : rows) {
-            PayChannel channel = registry.find(p.getChannel());
-            if (channel == null || !channel.queryable()) {
-                continue;
-            }
+        /*
+         * LinkedHashSet 去重：同一张支付单不可能同时是 paying 与 closed，
+         * 所以正常情况下去不了重 —— 但「不可能」不构成允许结果重复的理由。
+         * 对账的代价是一次真实的出站请求，重复一个号就是白白多打一次渠道。
+         */
+        Set<String> out = new LinkedHashSet<>();
+        for (Payment p : justClosed) {
+            addIfQueryable(out, p);
+        }
+        for (Payment p : stillOpen) {
+            addIfQueryable(out, p);
+        }
+        return new ArrayList<>(out);
+    }
+
+    /**
+     * 只有「渠道存在且支持查单」的支付单才进候选。
+     * <p>
+     * 这只是**预筛**，不是最终闸门 —— 真正决定要不要发请求的是
+     * {@link #reconcileOne} 里的同一份判断。两处都查一遍是为了让
+     * 「候选集」本身就不含注定会被跳过的号：否则批大小会被这类号占满。
+     */
+    private void addIfQueryable(Set<String> out, Payment p) {
+        PayChannel channel = registry.find(p.getChannel());
+        if (channel != null && channel.queryable()) {
             out.add(p.getId());
         }
-        return out;
     }
 
     /**
      * 对一笔支付单做主动对账：问渠道「这笔到底成了没有」，成了就结算。
+     * <p>
+     * ★ 处理的支付单包含 {@code closed}（关单后仍被追问一段，见
+     * {@link #findReconcileCandidates()}）★ 对这类单子，正常结局不是「订单复活」
+     * 而是「确认收款 → 订单已作废 → 自动原路退回」：关单过的订单不会被本方法救活，
+     * 它只保证那笔钱有归宿、有痕迹。
      * <p>
      * ★★★ 与回调走的是同一条结算路径 ★★★
      * <p>
@@ -725,9 +787,36 @@ public class PaymentService {
     @Transactional
     public ReconcileOutcome reconcileOne(String paymentId) {
         Payment payment = paymentMapper.selectById(paymentId);
-        if (payment == null || !Payment.STATUS_PAYING.equals(payment.getStatus())) {
+        if (payment == null) {
+            // 一轮里少一笔不该中断整批。对账天生要容忍「读到的时候它已经不在了」
+            return ReconcileOutcome.SKIPPED;
+        }
+        /*
+         * ★★★ 可对账的状态必须含 closed —— 否则「刚被关掉」那类候选会被当场跳过 ★★★
+         *   - paying：正常在途，结果未知；
+         *   - closed：**我们不再等了，不代表这笔没成**。用户在到期前最后一两分钟付款、
+         *     通知又始终不来时，这一笔正是关单之后才需要被追问的（见
+         *     findReconcileCandidates 的第二类候选）。
+         * 排除 created（还没送去收银台，问不出结果）与 success/failed/refunded（真终态）。
+         * ★ 放宽这里**不会**变成第二条入账路径 ★：确认收款后走的还是下面同一个
+         *   {@link #settle}，它自己的条件更新与订单闸门一个字都没改。
+         */
+        if (!Payment.STATUS_PAYING.equals(payment.getStatus())
+                && !Payment.STATUS_CLOSED.equals(payment.getStatus())) {
             // 已经被回调、关单任务或另一轮对账处理掉了。对账天生要容忍这个
             return ReconcileOutcome.SKIPPED;
+        }
+        if (Payment.STATUS_CLOSED.equals(payment.getStatus())) {
+            /*
+             * 诊断日志：这一笔是关单之后才来问的。若渠道确认收款，settle 会把支付单
+             * 恢复成 success，随后因订单已作废而走既有的自动原路退回 ——
+             * 即这条路径的正常结局是「钱退回去」，不是「订单复活」。
+             * 先把它说出来，免得日后看到 success → refunded 的轨迹时误判成异常。
+             */
+            log.warn("[pay-reconcile] reconciling a CLOSED payment (query after timeout close). "
+                            + "If the channel confirms payment it will be settled then auto-refunded. "
+                            + "paymentId={} orderId={}",
+                    payment.getId(), payment.getOrderId());
         }
         PayChannel channel = registry.find(payment.getChannel());
         if (channel == null || !channel.queryable()) {

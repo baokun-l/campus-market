@@ -12,11 +12,19 @@
  * 「突变没报红」到底是「判据没判别力」还是「这一轮压根没跑到那条用例」——
  * 本项目已经吃过一次「跑完发现一条测试都没跑」的亏。
  *
- * ★ 四次突变，每次只移掉**一个**可观测后果 ★
+ * ★ 六次突变，每次只移掉**一个**可观测后果 ★
  *   M1 金额闸门：对账时说「付款了」就结算，不再比金额 ⇒ 必须红 paidWithMismatchedAmountNeverSettles
  *   M2 可结算来源：把 closed 从条件更新里去掉       ⇒ 必须红 settleAcceptsClosedAsSourceStatus
  *   M3 四态语义：把「不认识的业务码」当成「确认没成」⇒ 必须红 unknownCodeIsUnavailable
  *   M4 无法识别的响应：把「缺节点/非 JSON」当成「确认没成」⇒ 必须红 两条（同一能力的两个入口）
+ *   M5 接待闸门：把 closed 从可对账状态里去掉       ⇒ 必须红 两条（同一能力的两个入口）
+ *   M6 候选查询：把「刚被关掉的」那一段整段去掉     ⇒ 必须红 两条
+ *
+ * ★ M5 与 M6 必须互不重叠 ★
+ * 这一轮（closed 候选回看窗口）改的两处是「候选选得出」与「选出后进得来」，
+ * 缺任何一处新能力都不成立，但症状相反（一个静默无候选、一个满屏 SKIPPED）。
+ * 两轮的 mustRed 集合完全不重叠 ⇒ 证明两处改动确实各自可被单独证伪，
+ * 而不是「只要拆掉任意一处，整套判据就一起红」那种分不清责任的红。
  *
  * ★ mustRed 写成**集合**：要求「恰好这些红、其余全绿」★
  * 只写一个名字时，无法区分「判据精确」与「顺手把别的也弄红了」。
@@ -45,8 +53,8 @@ const PAY_SERVICE = path.join(MAIN, 'service', 'PaymentService.java');
 const ALIPAY = path.join(MAIN, 'service', 'pay', 'AlipaySandboxPayChannel.java');
 
 const RUN_TESTS = 'PaymentServiceReconcileTest,PaymentServiceTest,AlipaySandboxQueryTest';
-/** 12 + 13 + 15（QueryTest 的四个 @Nested）= 40。用例数不对说明这一轮没跑到该跑的东西 */
-const EXPECTED_TESTS = 40;
+/** 16 + 13 + 15（QueryTest 的四个 @Nested）= 44（ReconcileTest 由 12 涨到 16：+4 条 closed 候选） */
+const EXPECTED_TESTS = 44;
 
 const MUTATIONS = [
   {
@@ -87,9 +95,80 @@ const MUTATIONS = [
     // 同一个能力的两个入口，都是「无法识别的响应绝不能被当成业务结论」
     mustRed: ['missingNodeIsUnavailable', 'malformedBodyIsUnavailable'],
   },
+  /*
+   * ★ 下面两轮（M5/M6）补的是 2026-09-24 新增的「closed 候选回看窗口」★
+   * 这一轮改了两处**互相独立**的代码：候选查询多了一段、接待闸门放宽了一档。
+   * 两处缺任何一处，新能力都不成立，但**症状完全不同**：
+   *   - 缺候选（M6）：整条路径静默失效，一笔都不会被问 —— 不报错、不打日志；
+   *   - 缺闸门（M5）：候选选出来了，但每一笔都在发请求之前被跳过 —— 日志里只有 SKIPPED。
+   * 所以必须各自能被单独证伪，否则「一起删掉」和「只删一处」在红灯里长得一样。
+   * M5 与 M6 的 mustRed 完全不重叠，且彼此互为对方的 mustStayGreen 对照组。
+   */
+  {
+    id: 'M5',
+    name: '接待闸门：把 closed 从「可对账状态」里去掉（候选照选，但一笔都进不来）',
+    file: PAY_SERVICE,
+    from: `        if (!Payment.STATUS_PAYING.equals(payment.getStatus())
+                && !Payment.STATUS_CLOSED.equals(payment.getStatus())) {`,
+    to: '        if (!Payment.STATUS_PAYING.equals(payment.getStatus())) {',
+    // 同一个能力的两个入口：确认收款 → 结算退钱；渠道说没成 → 一毫不改
+    mustRed: ['closedPaymentIsReconciledThenAutoRefunded',
+      'closedPaymentChannelSaysUnpaidIsLeftUntouched'],
+  },
+  {
+    id: 'M6',
+    name: '候选查询：把「刚被关掉的」那一段整段去掉（闸门放宽了，但永远没人被送来）',
+    file: PAY_SERVICE,
+    from: `        List<Payment> justClosed = paymentMapper.selectList(new LambdaQueryWrapper<Payment>()
+                .eq(Payment::getStatus, Payment.STATUS_CLOSED)
+                .ge(Payment::getUpdateTime, closedAfter)
+                .orderByAsc(Payment::getUpdateTime)
+                .last("LIMIT " + limit));`,
+    to: '        List<Payment> justClosed = List.of(); /* MUTATED-M6 */',
+    mustRed: ['candidateQueriesCarryBothTimeWindows', 'justClosedCandidatesComeFirst'],
+  },
 ];
 
 const sha = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+
+/*
+ * ★★★ 断点自愈：突变**不能**依赖「脚本一定会跑完」★★★
+ *
+ * 还原写在 finally 里，只能覆盖「进程正常走完或抛出异常」。它**覆盖不了**
+ * 「进程被 SIGTERM / 超时 / 关窗口杀掉」—— 那种情况下突变就留在源码里了。
+ * 更坏的是：它看起来完全正常。M1/M3/M4/M6 会留下 MUTATED 字样还能被 grep 到，
+ * 而 **M2 与 M5 只是把一段条件改窄/去掉，没有任何标记** ——
+ * 肉眼看 diff 都未必反应过来，而后果是资金路径变窄。
+ *
+ * 本项目 2026-09-24 真的踩了一次：一条命令里误带了一次重跑，它被 shell 结束时的
+ * SIGTERM 打断，恰好停在 M2 中间 —— settle 的条件更新里 STATUS_CLOSED 被摘掉，
+ * 而当时只有 git diff 能看出来。
+ *
+ * 所以：开跑前先把原始字节留底到 .redgreen-backup/；发现上次留下的备份
+ * （= 上次没跑完）就**先无条件还原再继续**；只有完整跑完才删掉备份。
+ * 这样任何一次被打断，都会在下一次运行时自愈，而不是静静地把突变留在仓库里。
+ */
+const BACKUP_DIR = path.join(ROOT, '.workbuddy', '.redgreen-backup');
+const backupOf = (f) => path.join(BACKUP_DIR, path.basename(f) + '.bak');
+const MUTATED_FILES = [...new Set(MUTATIONS.map((m) => m.file))];
+
+fs.mkdirSync(BACKUP_DIR, { recursive: true });
+for (const f of MUTATED_FILES) {
+  const bp = backupOf(f);
+  if (fs.existsSync(bp)) {
+    const pristine = fs.readFileSync(bp, 'utf8');
+    if (fs.readFileSync(f, 'utf8') !== pristine) {
+      fs.writeFileSync(f, pristine, 'utf8');
+      console.log(`[self-heal] 上次运行未走完，已还原 ${path.basename(f)}`);
+    } else {
+      console.log(`[self-heal] 上次运行未走完，但 ${path.basename(f)} 与留底一致（无需还原）`);
+    }
+    fs.unlinkSync(bp);
+  }
+  fs.copyFileSync(f, backupOf(f));
+}
+/** 本轮结束时各文件的原始字节，用于全局还原校验 */
+const PRISTINE_HASH = Object.fromEntries(MUTATED_FILES.map((f) => [f, sha(f)]));
 
 function runTests(logName) {
   execFileSync(NODE,
@@ -125,7 +204,7 @@ const report = [];
   });
 }
 
-/* ---------- 三次突变 ---------- */
+/* ---------- 六次突变 ---------- */
 for (const m of MUTATIONS) {
   const originalSrc = fs.readFileSync(m.file, 'utf8');
   const originalHash = sha(m.file);
@@ -166,6 +245,31 @@ for (const m of MUTATIONS) {
   report.push(result);
 }
 
+/*
+ * ★ 全局还原校验：逐个文件比对本轮开跑前留下的原始哈希 ★
+ * 单轮内的 sha 校验只能证明「那一轮还原得对」；这里再证明「整轮跑完以后
+ * 三份源码都回到了出发时的字节」。两者都过才敢说「源码没有被留在突变状态」。
+ */
+const restored = MUTATED_FILES.filter((f) => sha(f) !== PRISTINE_HASH[f]);
+if (restored.length > 0) {
+  report.push({
+    id: 'RESTORE', name: '全局还原校验：所有被突变过的源码必须回到出发字节',
+    verdict: 'RESTORE-FAILED',
+    error: '未还原的文件：' + restored.map((f) => path.basename(f)).join(', '),
+  });
+} else if (!report.some((r) => r.verdict === 'RESTORE-FAILED')) {
+  // 全部走完才删备份；中途被杀时备份会留下，供下一次运行自愈
+  for (const f of MUTATED_FILES) {
+    if (fs.existsSync(backupOf(f))) fs.unlinkSync(backupOf(f));
+  }
+  report.push({
+    id: 'RESTORE', name: '全局还原校验：所有被突变过的源码必须回到出发字节',
+    files: MUTATED_FILES.map((f) => path.basename(f)),
+    verdict: 'PASS',
+  });
+}
+
 console.log(JSON.stringify(report, null, 2));
 const allPass = report.every((r) => r.verdict === 'PASS');
 console.log(allPass ? '\nREDGREEN ALL PASS' : '\nREDGREEN HAS FAILURE');
+process.exit(allPass ? 0 : 1);
