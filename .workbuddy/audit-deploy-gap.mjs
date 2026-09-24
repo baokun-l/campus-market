@@ -721,6 +721,77 @@ check('D9', '会话凭据改 HttpOnly Cookie', () => {
     };
 });
 
+/* ---------- AI 多供应商降级链（P1-14，2026-09-24） ---------- */
+
+check('P1-14', 'AI 降级链 DeepSeek→千问→模板', () => {
+    /*
+     * ★ 判据锚「能力」不锚「字样」（随 P1-14 一起落地，已纳入 probe-audit-criteria-redgreen R30/R31）★
+     *
+     * 要的能力 = 「链首失败能自动换下一家，且运维能看见自己没配 key」，拆六条：
+     *   ① 配置面：application.yml 的 **app.ai** 段真有链顺序，且**至少两家**各有 base-url + model
+     *   ② 白名单：AiProperties 的 KNOWN_PROVIDERS 含 deepseek 与 qwen
+     *      （不在名单里的链名会被静默丢弃 ⇒「我明明配了却没生效」）
+     *   ③ 实现：AiProviderChain 真的 implements ChatModel，且**在循环里逐个尝试**
+     *   ④ 失败判据不只认异常：**空白 / null 也算失败**（兼容网关常不报错、只返空串）
+     *   ⑤ 出口：全失败抛专用异常（调用方 catch 后落回模板 ⇒ 前端契约不破）
+     *   ⑥ 运维面：deploy/env.example 登记了 APP_AI_* 变量；yml 排除了 OpenAI 自动配置
+     *
+     * ★ 一律在**剥注释**的代码上判定 —— 这些名字在注释里故意写满，不剥 = 注释自己骗自己（形态⑫）。
+     * ★ 必须先把 app: 段截出来再截其中的 ai: —— yml 里有**两个** ai:（spring.ai.retry 与 app.ai），
+     *   直接全局匹配会命中 spring 那一个，判据就成了「有没有 spring.ai 段」，与能力无关。
+     */
+    const ymlRaw = read(path.join(BE, 'src/main/resources/application.yml'));
+    const propsRaw = read(path.join(BE, 'src/main/java/com/campus/market/config/AiProperties.java'));
+    const chainRaw = read(path.join(BE, 'src/main/java/com/campus/market/service/ai/AiProviderChain.java'));
+    const envRaw = read(path.join(BE, 'deploy/env.example'));
+    if (!ymlRaw || !propsRaw || !chainRaw) {
+        return { state: 'MISSING', ev: `yml=${!!ymlRaw} props=${!!propsRaw} chain=${!!chainRaw}` };
+    }
+
+    // ---- ① 逐层截块（尾部加哨兵行，保证「最后一节」也能收得住）----
+    const appBlock = (() => {
+        const m = (ymlRaw + '\nZZZ_END:\n').match(/^app:\s*$([\s\S]*?)(?=^[A-Za-z])/m);
+        return m ? m[1] : '';
+    })();
+    const aiBlock = (() => {
+        const m = (appBlock + '\n  ZZZ_END:\n').match(/^ {2}ai:\s*$([\s\S]*?)(?=^ {2}\S)/m);
+        return m ? m[1] : '';
+    })();
+    const hasChainKey = /chain:\s*\S/.test(aiBlock);
+    const baseUrlCnt = (aiBlock.match(/base-url:/g) || []).length;
+    const modelCnt = (aiBlock.match(/model:/g) || []).length;
+    const configSurface = hasChainKey && baseUrlCnt >= 2 && modelCnt >= 2;
+    const excludedAuto = /autoconfigure:[\s\S]{0,200}?exclude:[\s\S]{0,200}?OpenAiAutoConfiguration/.test(ymlRaw);
+
+    // ---- ②③④⑤ 实现面（剥注释）----
+    const props = javaCode(propsRaw);
+    const chain = javaCode(chainRaw);
+    const knownList = /KNOWN_PROVIDERS\s*=\s*List\.of\(([^)]*)\)/.exec(props);
+    const whitelist = !!knownList && /"deepseek"/.test(knownList[1]) && /"qwen"/.test(knownList[1]);
+    const implementsChatModel = /class\s+AiProviderChain\s+implements\s+ChatModel/.test(chain);
+    const attempt = methodBody(chain, /private\s+<T>\s+T\s+attempt\s*\(/);
+    const loopsEach = !!attempt && /for\s*\(/.test(attempt) && /\.apply\s*\(/.test(attempt);
+    const checksEachResult = !!attempt && /ok\.test\s*\(\s*value\s*\)/.test(attempt);
+    // ★ 空白判据必须真判空，不能是恒真的谓词（否则「返空串」会被当成成功，降级永远不触发）
+    const blankCountsAsFailure = /text\s*!=\s*null\s*&&\s*!\s*text\.isBlank\(\)/.test(chain);
+    const customExit = /class\s+AiChainExhaustedException\s+extends\s+RuntimeException/.test(chain);
+
+    // ---- ⑥ 运维面 ----
+    const envDocs = !!envRaw && /APP_AI_DEEPSEEK_API_KEY/.test(envRaw) && /APP_AI_QWEN_API_KEY/.test(envRaw);
+
+    const ok = configSurface && excludedAuto && whitelist && implementsChatModel
+        && loopsEach && checksEachResult && blankCountsAsFailure && customExit && envDocs;
+
+    return {
+        state: ok ? 'DONE' : 'MISSING',
+        ev: `app.ai 配置面=${configSurface}(chain=${hasChainKey} baseUrl=${baseUrlCnt} model=${modelCnt})`
+            + ` 排除自动配置=${excludedAuto} | 白名单=${whitelist} implements ChatModel=${implementsChatModel}`
+            + ` 循环逐家试=${loopsEach} 判每家结果=${checksEachResult} 空响应算失败=${blankCountsAsFailure}`
+            + ` 专用出口=${customExit} | env.example 登记=${envDocs}`
+            + ` | 行为由 AiProviderChainTest 11 用例 + probe-ai-chain-live 17/17（含旧 jar 红绿 3/17）证明`,
+    };
+});
+
 /* ---------- 输出 ---------- */
 const ICON = { DONE: '✅', PARTIAL: '🟡', MISSING: '❌', INFO: '⚪', UNKNOWN: '❓' };
 console.log('=== 部署缺口盘点（回代码实测，非台账转抄）===\n');

@@ -1,5 +1,5 @@
 /**
- * 审计判据「红绿」全量探针 —— 证明 audit-deploy-gap.mjs 的 27 条判据真的有判别力
+ * 审计判据「红绿」全量探针 —— 证明 audit-deploy-gap.mjs 的 28 条判据真的有判别力
  *
  * 背景：审计脚本自己也会撒谎（本仓已抓到 9 种形态）。一条恒真的判据 = 一条注释。
  *       做法：把**代码变回旧实现**（能力被移除），要求**那条判据必须报红**，
@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 const ROOT = path.resolve(import.meta.dirname ?? process.cwd(), '..');
 const AUDIT = path.join(ROOT, '.workbuddy', 'audit-deploy-gap.mjs');
 const A = (p) => path.join(ROOT, p);
-const EXPECTED_CRITERIA = 27;
+const EXPECTED_CRITERIA = 28;
 
 const BE = 'campus-secondhand-backend';
 const FE = 'campus-secondhand-frontend';
@@ -48,6 +48,8 @@ const F = {
     mvnw: `${BE}/mvnw`,
     serviceFile: `${BE}/deploy/campus-market.service`,
     loginGuard: J('security/LoginAttemptGuard.java'),
+    aiProps: J('config/AiProperties.java'),
+    aiChain: J('service/ai/AiProviderChain.java'),
 };
 
 const hashOf = (t) => createHash('sha256').update(t).digest('hex');
@@ -193,6 +195,20 @@ const ROUNDS = [
       why: '把 package-lock.json 移走（`npm ci` 没了 lockfile 直接失败）',
       muts: [move(F.feLock)],
       probe: '若仍绿 ⇒ 判据名里的「npm ci」是空的：它只查 .nvmrc/engines，从不看 lockfile' },
+
+    /* ---------------- P1-14：AI 多供应商降级链 ---------------- */
+    { n: 'R30', crit: 'P1-14', expect: 'flip', mustFlip: ['P1-14'],
+      why: '把「空白响应也算失败」的成功谓词改成恒真（能力：链首返空串时自动换下一家）',
+      muts: [edit(F.aiChain, 'text -> text != null && !text.isBlank());', 'text -> true);')],
+      probe: '若仍绿 ⇒ 判据只看了「有没有 ok 谓词」这个形状，没看它到底判了什么 —— ' +
+          '而「网关不报错、只返空串」恰是最隐蔽的失败，用户看到的就是「AI 不回话」' },
+
+    { n: 'R31', crit: 'P1-14', expect: 'noflip', mustFlip: [],
+      why: '在 AiProviderChain 类声明前插一行**注释**，内容故意照抄能力判据的字样 —— 必须不翻转',
+      muts: [edit(F.aiChain, 'public class AiProviderChain implements ChatModel {',
+          '// red-green R31 control: text -> text != null && !text.isBlank() / KNOWN_PROVIDERS / APP_AI_DEEPSEEK_API_KEY\npublic class AiProviderChain implements ChatModel {')],
+      note: '这条直接守住 javaCode 的剥注释：该文件注释里本就写满这些名字，' +
+          '一旦剥注释退化，注释就会「满足」判据 ⇒ 本轮回红' },
 
     /* ---------------- 对照组 ---------------- */
     { n: 'C01', crit: '对照组', expect: 'noflip', mustFlip: [],
