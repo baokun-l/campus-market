@@ -8,6 +8,7 @@
  *
  * 用法：node .workbuddy/start-backend-ai.mjs
  *      node .workbuddy/start-backend-ai.mjs --jar=<文件名或关键字>   # 红绿对照用：钉住某个 jar
+ *      node .workbuddy/start-backend-ai.mjs --plain                 # 不覆写 AI 配置（恢复常规运行态）
  */
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -52,20 +53,28 @@ if (fs.existsSync(envFile)) {
   console.log('[start] 已加载 .env.local');
 }
 
-/* ---- 3. 叠加：把两个供应商指到本地假端点 ---- */
-Object.assign(env, {
-  APP_AI_CHAIN: 'deepseek,qwen',
-  APP_AI_DEEPSEEK_ENABLED: 'true',
-  APP_AI_DEEPSEEK_BASE_URL: 'http://127.0.0.1:18081',
-  APP_AI_DEEPSEEK_API_KEY: 'probe-key-deepseek',
-  APP_AI_DEEPSEEK_MODEL: 'deepseek-chat',
-  APP_AI_QWEN_ENABLED: 'true',
-  APP_AI_QWEN_BASE_URL: 'http://127.0.0.1:18082',
-  APP_AI_QWEN_API_KEY: 'probe-key-qwen',
-  APP_AI_QWEN_MODEL: 'qwen-plus',
-  APP_AI_OPENAI_ENABLED: 'false',
-});
-console.log('[start] AI 供应商已指向本地假端点 18081(deepseek) / 18082(qwen)');
+/* ---- 3. 叠加：把两个供应商指到本地假端点 ----
+ * ★ --plain：跳过覆写，直接以 .env.local 的常规配置启动（验证跑完用它恢复现场，
+ *   免得后端一直指着 127.0.0.1:18081/18082 这两个只在本轮存在的假服务器）。
+ */
+const plain = process.argv.includes('--plain');
+if (plain) {
+  console.log('[start] ★ --plain：不覆写 AI 配置，按 .env.local 常规启动');
+} else {
+  Object.assign(env, {
+    APP_AI_CHAIN: 'deepseek,qwen',
+    APP_AI_DEEPSEEK_ENABLED: 'true',
+    APP_AI_DEEPSEEK_BASE_URL: 'http://127.0.0.1:18081',
+    APP_AI_DEEPSEEK_API_KEY: 'probe-key-deepseek',
+    APP_AI_DEEPSEEK_MODEL: 'deepseek-chat',
+    APP_AI_QWEN_ENABLED: 'true',
+    APP_AI_QWEN_BASE_URL: 'http://127.0.0.1:18082',
+    APP_AI_QWEN_API_KEY: 'probe-key-qwen',
+    APP_AI_QWEN_MODEL: 'qwen-plus',
+    APP_AI_OPENAI_ENABLED: 'false',
+  });
+  console.log('[start] AI 供应商已指向本地假端点 18081(deepseek) / 18082(qwen)');
+}
 
 /* ---- 4. 找最新的 jar ----
  * ★ 坑（已踩）：本机 dist 下所有 jar 的 mtime 都被规整成 2026-01-01T00:00:00Z，
