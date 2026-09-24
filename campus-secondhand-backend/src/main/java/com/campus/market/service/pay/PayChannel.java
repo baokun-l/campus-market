@@ -128,6 +128,53 @@ public interface PayChannel {
     NotifyResult parseNotify(Map<String, String> params);
 
     /* ==================================================================
+     * 主动查单（回调丢了时的兜底）
+     * ================================================================== */
+
+    /**
+     * 这条渠道能不能被**主动查询**交易结果。
+     * <p>
+     * ★ 必须是一个独立的问题，不能靠「调一下 query() 试试」来回答 ★
+     * <p>
+     * 对账任务要先筛出「哪些支付单值得去问渠道」。如果靠调用 {@link #query} 试出来，
+     * 那么每筛一次就要往渠道打一次真实请求 —— 而筛的目的恰恰是**少打请求**。
+     * 更要紧的是：一个真实的查单请求到了渠道侧是**有成本、有风控计数**的，
+     * 用它当探针，等于把探测行为混进了业务流量。
+     */
+    default boolean queryable() {
+        return false;
+    }
+
+    /**
+     * 主动查单：渠道侧那笔交易到底成了没有。
+     * <p>
+     * ★★ 这是「回调丢了」唯一的解药 ★★
+     * <p>
+     * 异步通知是**尽力投递**，不是保证送达：渠道重推队列积压、回调地址短暂不可用、
+     * 我们这边重启，都会让通知永远到不了。此时用户的钱已经付了，而订单还停在「待付款」。
+     * <p>
+     * 更糟的是它不会一直等下去 —— 超时关单任务到点会把订单与支付单一起关掉，
+     * 于是事情定格成：**钱在渠道手上、订单已作废、而且按「终态跳过」的写法没有任何代码会去退它**。
+     * 所以「回调可能丢」这件事必须有一个**主动**的出口：由我们反过来问渠道，
+     * 而不是被动等它再来一次。
+     * <p>
+     * ★ 默认「不支持」是刻意的，不是没实现 ★
+     * <p>
+     * 钱包与演示渠道在 {@link #create} 当场就返回 {@code DONE}，根本不存在「结果未知」的窗口，
+     * 也就没有可查的远端状态。若默认抛 {@code UnsupportedOperationException} 或返回 null，
+     * 调用方就分不清「这条渠道不支持查单」与「渠道没查到」—— 而这两种情况的处置截然不同：
+     * 前者要跳过，后者要**原样留着、下一轮再问**（网络抖动问不到 ≠ 这笔没成）。
+     *
+     * @param outTradeNo 提交给渠道的商户订单号（本项目即支付单号）
+     * @return 查询结果；{@link QueryOutcome#UNSUPPORTED} 表示该渠道没有查单能力。
+     *         ★ 实现方不得在这里判金额是否相符 ★ —— 那要与支付单一起比，属于业务规则
+     *         （与 {@link #parseNotify} 同一条边界）
+     */
+    default QueryResult query(String outTradeNo) {
+        return QueryResult.unsupported();
+    }
+
+    /* ==================================================================
      * 退款
      * ================================================================== */
 
@@ -225,6 +272,62 @@ public interface PayChannel {
         /** 验签失败 */
         public static NotifyResult rejected(String raw) {
             return new NotifyResult(false, null, null, null, false, "验签失败", raw);
+        }
+    }
+
+    /**
+     * 主动查单的**四态**结果。
+     * <p>
+     * ★★ 为什么不是「成功 / 失败」两态 ★★
+     * <p>
+     * 把「问不到」和「问到了、这笔没成」混在一起，会让对账任务做出错误动作。
+     * 举个最容易踩的：网络超时导致查单失败 —— 若当成「这笔没成」，
+     * 就可能去标记失败甚至关单，而实际上用户的钱早已到账。
+     * 所以这里把四件事分开：
+     * <ul>
+     *   <li>{@link QueryOutcome#UNSUPPORTED} 渠道没有查单能力（同步渠道）→ 跳过；</li>
+     *   <li>{@link QueryOutcome#UNAVAILABLE} 查单**本身**没问成（网络/网关/验签不过）
+     *       → 结论未知，本轮什么都不做，下一轮再问；</li>
+     *   <li>{@link QueryOutcome#PAID} 渠道确认钱已到账 → 交给结算；</li>
+     *   <li>{@link QueryOutcome#NOT_PAID} 渠道确认这笔还没成（等待付款 / 已关闭 / 查无此单）
+     *       → 什么都不做，<b>尤其不要在这里标失败</b>：
+     *       {@code WAIT_BUYER_PAY} 是用户还站在收银台前的**正常状态**，
+     *       提前标失败会与「用户下一秒付款成功」直接冲突。</li>
+     * </ul>
+     */
+    enum QueryOutcome {
+        /** 该渠道没有主动查单能力（钱包 / 演示这类同步渠道）。跳过，不是错误 */
+        UNSUPPORTED,
+        /** 查单请求本身没问成。**结论未知**，不得据此改变任何状态 */
+        UNAVAILABLE,
+        /** 渠道确认：钱已到账 */
+        PAID,
+        /** 渠道确认：这笔还没成（等待付款 / 交易已关闭 / 查无此单） */
+        NOT_PAID
+    }
+
+    /**
+     * 主动查单的结果。
+     *
+     * @param outcome    四态结论（见 {@link QueryOutcome}）
+     * @param outTradeNo 商户订单号（回显，便于调用方核对问的是哪一笔）
+     * @param tradeNo    渠道流水号（{@code PAID} 时应有值；这是对账的唯一钥匙）
+     * @param paidAmount 渠道声明的实收金额（与支付单金额的比对在 Service 层，不在这里）
+     * @param tradeStatus 渠道原始交易状态字符串（如 {@code TRADE_SUCCESS}），存证用
+     * @param message    说明（{@code NOT_PAID} / {@code UNAVAILABLE} 时有值）
+     */
+    record QueryResult(QueryOutcome outcome, String outTradeNo, String tradeNo,
+                       BigDecimal paidAmount, String tradeStatus, String message) {
+
+        /** 该渠道不支持查单 */
+        public static QueryResult unsupported() {
+            return new QueryResult(QueryOutcome.UNSUPPORTED, null, null, null, null,
+                    "该渠道不支持主动查单");
+        }
+
+        /** 没问成：网络 / 网关 / 响应验签不过。**结论未知** */
+        public static QueryResult unavailable(String message) {
+            return new QueryResult(QueryOutcome.UNAVAILABLE, null, null, null, null, message);
         }
     }
 

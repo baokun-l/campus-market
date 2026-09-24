@@ -50,6 +50,11 @@ import java.util.Map;
  *      └─ 异步渠道（支付宝）→ 用户去付
  *                                ↓  POST /pay/notify/{channel}（公开，靠验签）
  *                             验签 → appid → 金额 → 幂等 → settle
+ *                                ↑
+ *                     ↑ 这条通知**可能永远不来**（尽力投递，真机已发生过）
+ *                                ↑
+ *        兜底：PaymentReconcileJob 定时任务 → 主动 ask 渠道（alipay.trade.query）
+ *              → 金额闸门 → 同一个 settle
  *                                                        ↓
  *                                          orderService.markPaid  ← 唯一翻状态处
  * </pre>
@@ -343,10 +348,17 @@ public class PaymentService {
      * 幂等靠支付单上的条件更新：
      * <pre>
      *   UPDATE t_payment SET status='success', trade_no=?, paid_at=?, notify_payload=?
-     *    WHERE id=? AND status IN ('created','paying')
+     *    WHERE id=? AND status IN ('created','paying','closed')
      * </pre>
-     * {@code affected == 0} 说明这张支付单已经是终态（成功过、失败过或已关闭）——
-     * 此时**直接返回**，不碰订单。这就是「渠道重复投递同一条通知」不会重复推进订单的原因。
+     * {@code affected == 0} 说明这张支付单早已入账（{@code success}/{@code refunded}）
+     * 或已被渠道明确判定失败（{@code failed}）—— 此时**直接返回**，不碰订单。
+     * 这就是「渠道重复投递同一条通知」不会重复推进订单的原因。
+     * <p>
+     * ★ 来源状态里为什么有 {@code closed} ★
+     * 见方法体里的长注释：{@code closed} 不代表「这笔没成」，只代表**我们不再等了**。
+     * 而钱可能在关单的同一秒到账、通知又晚到几小时。把它排除在外会让这笔钱
+     * 既不入账也不退回 —— 无痕的进账。放进来之后，后续「订单已不可付」
+     * 那段既有的 {@link #autoRefund} 会自然接管。
      * <p>
      * 若订单已经不可付（被超时关单抢先），钱已经收了、货却卖不了，
      * 此时触发 {@link #autoRefund} 原路退回。
@@ -357,18 +369,62 @@ public class PaymentService {
     @Transactional
     public void settle(Payment payment, String tradeNo, String notifyPayload) {
         LocalDateTime now = LocalDateTime.now();
+        /*
+         * ★★★ 允许的来源状态包含 closed —— 这是 2026-09-23 补的一个「钱不留痕」的洞 ★★★
+         *
+         * 原先只允许 created / paying，注释里把 affected=0 一律解释成
+         * 「已经处理过（重复投递）」并直接返回。但 closed 与 success 根本不是一回事：
+         *   - success / refunded → 钱已入账（或已退回），重复投递，跳过是对的；
+         *   - **closed → 钱可能真的到了，只是比我们关单晚了一步**。
+         *
+         * closed 是超时关单任务在 expire_at 到点写下的，而渠道的通知是**尽力投递**：
+         * 支付宝在收到 success 响应前会按 4m/10m/10m/1h/2h/6h/15h 一直重推，
+         * 所以「用户卡在关单前后付款 + 通知晚到」是真实可达的。原实现走到这里会
+         * 静默返回，于是事情定格成：**钱在渠道手上、订单已作废、而且没有任何代码会去退它** ——
+         * 一笔无痕的进账，正是本模块最不能接受的形态。
+         *
+         * ★ 为什么把 closed 放进条件更新的「允许来源」，而不是再写一遍补救代码 ★
+         * 因为条件更新本身就是幂等闸门：无论谁先到，closed → success 只有一次能成功，
+         * 之后状态是 success/refunded，再来一条重复通知必然 affected=0 被跳过。
+         * 补救逻辑则不必新写 —— 状态一旦恢复成 success，下面「订单已不可付」
+         * 那段既有的自动原路退回就会自然接管，钱会被退回去。
+         *
+         * ★ 安全性前提（本方法的契约，调用方必须守住）★
+         * settle 只允许在**渠道已确认收款**之后调用：同步渠道的 create()==DONE、
+         * 回调路径的 notify.success()==true 且金额相符、对账路径的 outcome==PAID 且金额相符。
+         * 三处调用点都满足。若将来新增调用点，这一条是必须延续的前提 ——
+         * 否则一个「没付款但状态被关掉」的支付单会被误判成已收款。
+         */
         int affected = paymentMapper.update(null, new LambdaUpdateWrapper<Payment>()
                 .eq(Payment::getId, payment.getId())
-                .in(Payment::getStatus, Payment.STATUS_CREATED, Payment.STATUS_PAYING)
+                .in(Payment::getStatus, Payment.STATUS_CREATED, Payment.STATUS_PAYING,
+                        Payment.STATUS_CLOSED)
                 .set(Payment::getStatus, Payment.STATUS_SUCCESS)
                 .set(Payment::getTradeNo, tradeNo)
                 .set(Payment::getPaidAt, now)
                 .set(Payment::getNotifyPayload, notifyPayload));
 
         if (affected == 0) {
+            /*
+             * 走到这里只剩两种情形，都是**真·重复投递**：
+             *   - success / refunded：这笔钱早已入账（或已退回）；
+             *   - failed：渠道此前已明确判定这笔没成。
+             * 注意 closed **不会**出现在这里 —— 它已被上面放行。
+             */
             log.info("[pay] settlement skipped (already terminal) paymentId={} status={}",
                     payment.getId(), currentStatus(payment.getId()));
             return;
+        }
+
+        /*
+         * 诊断用：入参 payment 的状态是**调用方刚刚读出来的库值**（三个调用点都走
+         * selectOne/selectById 现取，没有缓存），所以拿它判断「这笔是不是关掉后才到的款」
+         * 是准的。只打日志、不参与任何判断 —— 绝不能让一个诊断分支影响资金动作。
+         */
+        if (Payment.STATUS_CLOSED.equals(payment.getStatus())) {
+            log.warn("[pay] channel confirmed payment on a CLOSED payment (notify arrived after "
+                            + "timeout close) - order will be auto-refunded. paymentId={} orderId={}",
+                    payment.getId(), payment.getOrderId());
         }
 
         boolean advanced = orderService.markPaid(payment.getOrderId(), payment.getChannel());
@@ -569,6 +625,153 @@ public class PaymentService {
             log.info("[pay] timeout close done. payments={} orders={}", closedPayments, closedOrders);
         }
         return closedOrders;
+    }
+
+    /* ==================================================================
+     * 主动对账（回调丢失时的兜底）
+     * ================================================================== */
+
+    /**
+     * 一笔支付单的对账结论（供定时任务统计与打日志）。
+     */
+    public enum ReconcileOutcome {
+        /** 不需要处理：不是 paying / 渠道不支持查单 / 已被别的路径处理掉 */
+        SKIPPED,
+        /** 查单请求没问成（网络、网关、验签）。**什么都没改**，下一轮再问 */
+        UNAVAILABLE,
+        /** 渠道确认这笔还没成（用户还在收银台 / 交易已关闭）。什么都没改 */
+        NOT_PAID,
+        /** 渠道确认钱已到账，且金额与支付单逐分相等 → 已结算 */
+        SETTLED,
+        /** 渠道说付款了，但金额与支付单不符 → 拒绝结算，留 ERROR 待人工核对 */
+        AMOUNT_MISMATCH
+    }
+
+    /**
+     * 找出「值得去问渠道」的支付单号。
+     * <p>
+     * ★★ 这个方法回答的是「哪些订单可能已经付了钱、而我们不知道」★★
+     * <p>
+     * 入选条件三条，缺一不可：
+     * <ol>
+     *   <li>{@code status = 'paying'}：只有这个状态代表「已把用户送去收银台、结果未知」。
+     *       {@code created} 还没送出去，{@code success/closed/failed/refunded} 都已有结论；</li>
+     *   <li>{@code expire_at > now}：<b>已过期的交给超时关单任务，不在这里抢</b>。
+     *       两个任务同时处理同一笔会在「关单」与「入账」之间形成难以复现的竞态，
+     *       而这类竞态的后果是钱；边界必须清晰 —— 未过期归对账，已过期归关单，
+     *       而「关单之后才到的付款」由 {@link #settle} 的自动退回兜住；</li>
+     *   <li>{@code create_time < now - 宽限期}：见
+     *       {@link PayProperties#getReconcileGraceMinutes()}，避免把「用户正在付款」
+     *       误当成「回调可能丢了」。</li>
+     * </ol>
+     * <p>
+     * ★ 渠道筛选放在这里而不是 SQL 里 ★
+     * SQL 不知道哪条渠道支持查单。不用「调一下 query 试试」那种探测式判断
+     * （那等于每筛一次就往渠道打请求），而是问 {@link PayChannel#queryable()}。
+     * 实践中同步渠道（钱包 / 演示）在 {@code create} 当场就结算，根本不会留下
+     * {@code paying} 的行，所以这个筛选通常是空转 —— 但它必须存在：
+     * 将来新增一条「同步创建、异步结果」的渠道时，这里不会把它错当成可查单的渠道。
+     *
+     * @return 待对账的支付单号，按建单时间从早到晚
+     */
+    public List<String> findReconcileCandidates() {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime createdBefore = now.minusMinutes(Math.max(1, props.getReconcileGraceMinutes()));
+
+        List<Payment> rows = paymentMapper.selectList(new LambdaQueryWrapper<Payment>()
+                .eq(Payment::getStatus, Payment.STATUS_PAYING)
+                .isNotNull(Payment::getExpireAt)
+                .gt(Payment::getExpireAt, now)
+                .lt(Payment::getCreateTime, createdBefore)
+                .orderByAsc(Payment::getCreateTime)
+                .last("LIMIT " + Math.max(1, props.getReconcileBatchSize())));
+
+        List<String> out = new ArrayList<>();
+        for (Payment p : rows) {
+            PayChannel channel = registry.find(p.getChannel());
+            if (channel == null || !channel.queryable()) {
+                continue;
+            }
+            out.add(p.getId());
+        }
+        return out;
+    }
+
+    /**
+     * 对一笔支付单做主动对账：问渠道「这笔到底成了没有」，成了就结算。
+     * <p>
+     * ★★★ 与回调走的是同一条结算路径 ★★★
+     * <p>
+     * 这里**没有**任何自己的入账逻辑：确认收款后调用的还是 {@link #settle}，
+     * 也就是回调那条路径终点的同一个方法。所以「对账兜底」不会变成第二条
+     * 能把订单推进到待发货的路 —— 全仓依然只有一个入口，审计口径没有变宽。
+     * <p>
+     * ★ 金额闸门与回调**同一条**，一分都不能松 ★
+     * 渠道回传的实收金额必须与支付单逐分相等才结算。少了不行（少付钱），
+     * 多了也不行（多收的钱没有归属，反而制造对账难题）。不等时不结算、
+     * 只留一条带全部数字的 ERROR 日志 —— 与回调路径的行为一致：
+     * <b>拒绝 + 留证据 + 等人工</b>，而不是自己猜一个处理方式。
+     * <p>
+     * ★ 为什么本方法带 {@code @Transactional} 而调用方（定时任务）逐笔调用 ★
+     * 单笔的「改支付单 + 推进订单」必须同生共死；而整批共用一个事务会让
+     * 某一笔的数据异常把整批回滚掉，定时任务没有重试机制，后果是**每一轮都失败
+     * 在同一笔上，后面的永远处理不到**。所以入口在调度器那一侧逐笔循环、
+     * 每笔独立事务（与 {@link #closeExpired} 同一套取舍）。
+     * <p>
+     * 另注：这里能生效是因为调用方是**另一个 Bean**（{@code PaymentReconcileJob}）——
+     * Spring 的事务靠代理织入，若把 {@code @Scheduled} 写在本类里再调自己，
+     * 拿到的会是原始对象、事务静默失效。这条坑见 {@code GoodsOfflineJob} 的类注释。
+     */
+    @Transactional
+    public ReconcileOutcome reconcileOne(String paymentId) {
+        Payment payment = paymentMapper.selectById(paymentId);
+        if (payment == null || !Payment.STATUS_PAYING.equals(payment.getStatus())) {
+            // 已经被回调、关单任务或另一轮对账处理掉了。对账天生要容忍这个
+            return ReconcileOutcome.SKIPPED;
+        }
+        PayChannel channel = registry.find(payment.getChannel());
+        if (channel == null || !channel.queryable()) {
+            return ReconcileOutcome.SKIPPED;
+        }
+
+        PayChannel.QueryResult result = channel.query(payment.getOutTradeNo());
+        switch (result.outcome()) {
+            case UNSUPPORTED -> {
+                return ReconcileOutcome.SKIPPED;
+            }
+            case UNAVAILABLE -> {
+                // 结论未知：一个字都不改，下一轮再问。绝不能因为「问不到」就动状态
+                log.warn("[pay-reconcile] query unavailable, leaving untouched. paymentId={} reason={}",
+                        payment.getId(), result.message());
+                return ReconcileOutcome.UNAVAILABLE;
+            }
+            case NOT_PAID -> {
+                /*
+                 * ★ 这里刻意「什么都不做」★
+                 * WAIT_BUYER_PAY 是用户还站在收银台前的**正常状态**；TRADE_CLOSED
+                 * 与「查无此单」也由超时关单任务按 expire_at 统一收口。
+                 * 若在这里标失败，就与「用户下一秒付款成功」直接冲突。
+                 */
+                return ReconcileOutcome.NOT_PAID;
+            }
+            case PAID -> {
+                if (result.paidAmount() == null
+                        || result.paidAmount().compareTo(payment.getAmount()) != 0) {
+                    log.error("[pay-reconcile] AMOUNT MISMATCH - manual check required. "
+                                    + "paymentId={} orderId={} outTradeNo={} expect={} channelSaid={} tradeNo={}",
+                            payment.getId(), payment.getOrderId(), payment.getOutTradeNo(),
+                            payment.getAmount(), result.paidAmount(), result.tradeNo());
+                    return ReconcileOutcome.AMOUNT_MISMATCH;
+                }
+                // 原始报文与回调同列存证；加标记是为了事后能分清「这笔是被查单兜住的」，
+                // 而不是白等一场回调 —— 对账时这个区别很重要（它代表回调链路有问题）
+                settle(payment, result.tradeNo(), "[reconcile] " + result.tradeStatus());
+                return ReconcileOutcome.SETTLED;
+            }
+            default -> {
+                return ReconcileOutcome.SKIPPED;
+            }
+        }
     }
 
     /* ==================================================================

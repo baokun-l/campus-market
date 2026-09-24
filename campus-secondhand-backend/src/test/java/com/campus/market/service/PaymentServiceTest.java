@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
@@ -28,6 +29,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -152,6 +154,109 @@ class PaymentServiceTest {
         when(registry.find("alipay_sandbox")).thenReturn(channel);
 
         service.settle(createdPayment(), "trade_1", "raw");
+
+        verify(channel, times(1)).refund(any(PayChannel.RefundContext.class));
+    }
+
+    /* ============================================================
+     * ★★ 关单之后才到的款：2026-09-23 补的「钱不留痕」的洞
+     * ============================================================ */
+
+    /**
+     * ★★ 这两条守的是同一个洞，拆成两条是因为它们坏起来的方式不同 ★★
+     * <p>
+     * 背景：{@code closeExpired} 到 {@code pay_expire_at} 会把支付单写成 {@code closed}，
+     * 而渠道的通知是尽力投递（支付宝会按 4m/10m/10m/1h/2h/6h/15h 一直重推）。
+     * 所以「用户卡在关单前后付款 + 通知晚到」是真实可达的。
+     * <p>
+     * 老实现把 {@code affected == 0} 一律解释成「已处理过的重复投递」并直接返回，
+     * 于是一笔**真实进账**被静默丢弃：钱在渠道手上、订单已作废、没有任何代码会去退它。
+     * 它比「多退一笔」更隐蔽 —— 界面上什么都不会显示，只有对账时才发现账实不符。
+     */
+    @Test
+    @DisplayName("★★ settle 的来源状态必须包含 closed —— 少了它，关单后到账的钱就是一笔无痕进账")
+    void settleAcceptsClosedAsSourceStatus() {
+        when(paymentMapper.update(any(), any(LambdaUpdateWrapper.class))).thenReturn(1);
+        when(orderService.markPaid(ORDER_ID, "alipay_sandbox")).thenReturn(true);
+
+        service.settle(createdPayment(), "trade_1", "raw");
+
+        /*
+         * ★ 这条断言锚的是**渲染出来的 SQL 里的 IN 子句**，不是「我们调用了 update」★
+         *
+         * 写成这样是踩了两次坑之后的结果，两次都是「锚错了对象」：
+         *   ① 只断言 update 被调用 ⇒ 条件被重新收紧时照样通过，等于没守；
+         *   ② 断言 getParamNameValuePairs() 里有 "closed" ⇒ 报红，但**不是代码错了**：
+         *      MyBatis-Plus 把 set() 的值放进参数表，而 eq()/in() 的值拿不到
+         *      （实测该 map 里只有 4 个 set 值），所以即使 closed 真的被放行，断言也失败。
+         *
+         * ★ 这条断言能证明什么、不能证明什么（如实记）★
+         * 能证明：可结算的来源状态**有 3 个**，也就是 created / paying / closed 全在。
+         *        谁把 closed 去掉，IN 子句就只剩 2 个占位符，当场报红。
+         * 不能证明：SQL 在真实 MySQL 上对一行 closed 数据确实会命中 ——
+         *        那属于 SQL 语义，单测的 mapper 是 mock，看不到。
+         *        这一层由真机验证补：{@code .workbuddy/tmp/verify-reconcile-closed-refund.mjs}
+         *        （对真实库造一行 closed 支付单，走真实 update，看是否真的翻转并退回）。
+         */
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaUpdateWrapper<Payment>> captor =
+                ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(paymentMapper).update(org.mockito.ArgumentMatchers.<Payment>isNull(), captor.capture());
+        String sql = captor.getValue().getSqlSegment();
+
+        java.util.regex.Matcher in = java.util.regex.Pattern
+                .compile("status IN \\(([^)]*)\\)").matcher(sql);
+        assertTrue(in.find(), "找不到 status IN (...) 条件，条件更新可能被整体改写：" + sql);
+        long sourceCount = in.group(1).split(",").length;
+        assertEquals(3, sourceCount,
+                "可结算的来源状态必须是 created / paying / closed 三种。"
+                        + "少了 closed ⇒ 超时关单后到达的付款既不入账也不退回，"
+                        + "变成一笔界面上完全看不见的无痕进账。实际 WHERE=" + sql
+                        + " 参数表=" + captor.getValue().getParamNameValuePairs());
+    }
+
+    @Test
+    @DisplayName("★★ 支付单已 closed 后钱才到 → 自动原路退回（而不是静默跳过）")
+    void settleOnClosedPaymentAutoRefunds() {
+        Payment closed = createdPayment();
+        closed.setStatus(Payment.STATUS_CLOSED);
+
+        // closed 已被放行进来源状态 ⇒ 这次状态翻转成功
+        when(paymentMapper.update(any(), any(LambdaUpdateWrapper.class))).thenReturn(1);
+        // 但订单早被关单任务改成 cancelled，推进必然失败
+        when(orderService.markPaid(ORDER_ID, "alipay_sandbox")).thenReturn(false);
+
+        PayChannel channel = mock(PayChannel.class);
+        when(channel.refundable()).thenReturn(true);
+        when(channel.refund(any(PayChannel.RefundContext.class)))
+                .thenReturn(PayChannel.RefundResult.ok("r1", "已退回"));
+        when(registry.find("alipay_sandbox")).thenReturn(channel);
+
+        service.settle(closed, "trade_1", "raw");
+
+        verify(channel, times(1)).refund(any(PayChannel.RefundContext.class));
+    }
+
+    @Test
+    @DisplayName("★★ 同一条晚到通知重推多次 → 只会退回一次（幂等靠状态条件更新，不靠先查后写）")
+    void lateNotifyRefundsOnlyOnce() {
+        Payment closed = createdPayment();
+        closed.setStatus(Payment.STATUS_CLOSED);
+
+        // 第一次：条件更新命中（closed → success）；第二次：状态已是 refunded，命中 0 行
+        when(paymentMapper.update(any(), any(LambdaUpdateWrapper.class))).thenReturn(1, 0);
+        when(orderService.markPaid(ORDER_ID, "alipay_sandbox")).thenReturn(false);
+
+        PayChannel channel = mock(PayChannel.class);
+        when(channel.refundable()).thenReturn(true);
+        when(channel.refund(any(PayChannel.RefundContext.class)))
+                .thenReturn(PayChannel.RefundResult.ok("r1", "已退回"));
+        when(registry.find("alipay_sandbox")).thenReturn(channel);
+
+        Payment again = createdPayment();
+        again.setStatus(Payment.STATUS_CLOSED);
+        service.settle(closed, "trade_1", "raw");
+        service.settle(again, "trade_1", "raw");
 
         verify(channel, times(1)).refund(any(PayChannel.RefundContext.class));
     }

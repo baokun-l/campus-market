@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -34,7 +35,7 @@ import java.util.Map;
  *   <li><b>回调可能丢</b>：网络抖动、服务重启都可能导致通知没到，
  *       所以要有主动查单兜底。</li>
  * </ul>
- * 前三条在本模块里都是真做的；第四条（主动查单）见 {@link #queryTrade}。
+ * 前三条在本模块里都是真做的；第四条（主动查单）见 {@link #query}。
  *
  * ★★ 配置与「沉默地不可用」★★
  * <p>
@@ -256,11 +257,11 @@ public class AlipaySandboxPayChannel implements PayChannel {
         String tradeStatus = params.get("trade_status");
         boolean success = "TRADE_SUCCESS".equals(tradeStatus) || "TRADE_FINISHED".equals(tradeStatus);
 
-        java.math.BigDecimal paid = null;
+        BigDecimal paid = null;
         String totalAmount = params.get("total_amount");
         if (totalAmount != null && !totalAmount.isBlank()) {
             try {
-                paid = new java.math.BigDecimal(totalAmount);
+                paid = new BigDecimal(totalAmount);
             } catch (NumberFormatException e) {
                 // 金额解析不出来 = 报文不可信（验签已经过了，所以这只可能是协议变化）
                 log.warn("[pay] alipay notify total_amount unparsable: {}", totalAmount);
@@ -341,33 +342,120 @@ public class AlipaySandboxPayChannel implements PayChannel {
     /**
      * 主动查单：回调丢了时的兜底手段。
      * <p>
-     * ★ 为什么必须有它 ★
+     * ★ 为什么必须有它，而不是「等回调重推就好」★
+     * <p>
      * 异步通知是**尽力投递**：服务重启、网络抖动、回调地址短暂不可用，
      * 都会让通知永远到不了。此时用户的钱已经付了，而订单还停在「待付款」——
-     * 用户投诉、平台却查不出原因。有了查单，"回调丢了"就只是"晚几分钟到账"。
+     * 用户投诉、平台却查不出原因。有了查单，「回调丢了」就只是「晚几分钟到账」。
      * <p>
-     * 本方法目前只提供给排障与将来的定时对账使用（没有挂进主流程），
-     * 因为把「主动查单」做成定时任务需要一个稳定的轮询频率，
-     * 而这属于对账系统的范畴 —— 先把它作为可调用的能力放在这里，
-     * 比临时在某个 Service 里拼一个 URL 出去要好。
+     * ★★ 两个必须先想清楚的细节 ★★
+     * <ol>
+     *   <li><b>查单响应同样要验签</b>：走 {@link #post}，复用出站响应验签。
+     *       不验的话，一个被中间层篡改成 {@code code=10000, trade_status=TRADE_SUCCESS}
+     *       的响应就能让我们把一笔没付款的订单推进到待发货；</li>
+     *   <li><b>{@code 40004 ACQ.TRADE_NOT_EXIST} 不是错误，是结论</b>：它表示
+     *       支付宝那边根本没有这笔交易（用户压根没到收银台，或交易已过期清除）。
+     *       归入 {@link QueryOutcome#NOT_PAID}，而不是 {@code UNAVAILABLE} ——
+     *       前者「确认没成」，后者「没问成」，混为一谈会让网络故障变成错误的业务结论。</li>
+     * </ol>
+     * <p>
+     * ★ 2026-09-23 真机背景 ★
+     * 沙箱环境下真实支付完成后，支付宝**没有**向我们投递异步通知（回调地址经内网穿透已
+     * 验证可达、后端也已在等待，日志里零条回调），而 {@code alipay.trade.query}
+     * 明确返回 {@code TRADE_SUCCESS}。也就是说「回调丢失」不是理论风险，
+     * 是本项目真机上已经发生过一次的事实 —— 而当时这条查单能力**没有任何调用方**，
+     * 于是那一笔只能永远卡在待付款。这正是不该把兜底写成「留给将来的定时对账」的原因。
      *
-     * @return 支付宝侧的交易状态字符串（如 {@code TRADE_SUCCESS}）；查询失败返回 null
+     * @return 四态结果，见 {@link QueryOutcome}
      */
-    public String queryTrade(String outTradeNo) {
+    @Override
+    public boolean queryable() {
+        return true;
+    }
+
+    @Override
+    public QueryResult query(String outTradeNo) {
         Map<String, Object> biz = new LinkedHashMap<>();
         biz.put("out_trade_no", outTradeNo);
         String body;
         try {
             body = post(METHOD_QUERY, RESP_QUERY, toJson(biz));
         } catch (BusinessException e) {
-            log.warn("[pay] alipay trade query failed: {}", e.getMessage());
-            return null;
+            /*
+             * 连不上 / 网关非 200 / 响应验签不过 —— 一律归为「没问成」。
+             * ★ 关键：绝不能在这里返回 NOT_PAID ★
+             * 「问不到」与「问到了、这笔没成」完全不同：后者可以据此关单，
+             * 前者如果被当成结论，一次网络抖动就足以把一笔真付款判死。
+             */
+            log.warn("[pay] alipay trade query UNAVAILABLE. outTradeNo={} reason={}",
+                    outTradeNo, e.getMessage());
+            return QueryResult.unavailable(e.getMessage());
         }
+        return mapQueryResponse(outTradeNo, body);
+    }
+
+    /**
+     * 把查单响应映射成四态结论。
+     * <p>
+     * ★ 单独拆出来是为了能被单测直接钉住 ★
+     * 这里的判断全是「业务码 + 交易状态 → 结论」的纯逻辑，而它恰恰是最容易写错的一层：
+     * 把 {@code WAIT_BUYER_PAY} 当成失败、把 {@code ACQ.TRADE_NOT_EXIST} 当成异常，
+     * 都会让对账任务对一笔正常的支付做出错误动作，而现象要等到对账时才发现。
+     * 拆成纯函数后，不必连网关就能覆盖全部分支（见 {@code AlipaySandboxQueryTest}）。
+     */
+    QueryResult mapQueryResponse(String outTradeNo, String body) {
         JsonNode node = readNode(body, RESP_QUERY);
-        if (node == null) {
+        /*
+         * ★ 必须同时判 isMissingNode —— 只判 null 是一个「看起来判了、其实没判」的守卫 ★
+         *
+         * Jackson 的 {@code path(key)} 在键不存在时返回的是 **MissingNode 对象**，不是 null；
+         * 只有解析抛异常时 {@code readNode} 才返回 null。所以原来只写 {@code node == null} 时，
+         * 「响应里根本没有 alipay_trade_query_response 节点」这种情况会一路往下走，
+         * 落到「不认识的业务码」那个分支，并拼出一句
+         * `支付宝查单返回 code= sub_code=` —— 两个字段都是空串，排障时等于什么都没说。
+         *
+         * 而这一分支恰恰指向一个很具体的故障：**节点名写错了**（或网关返回了别的形状）。
+         * 单独判掉、并把期望的节点名写进消息，才能让这条日志自己回答「该去改哪儿」。
+         * （注：正常出站路径上，响应验签 {@link #verifyResponseSign} 会先一步拦下这种情况；
+         *   这里再判一次是为了让本方法成为一个**没有模糊出口**的纯函数。）
+         */
+        if (node == null || node.isMissingNode()) {
+            return QueryResult.unavailable("支付宝查单响应缺少 " + RESP_QUERY + " 节点");
+        }
+        String code = node.path("code").asText("");
+        String subCode = node.path("sub_code").asText("");
+        String tradeStatus = node.path("trade_status").asText(null);
+        String tradeNo = node.path("trade_no").asText(null);
+
+        if (ALIPAY_SUCCESS.equals(code)) {
+            boolean paid = "TRADE_SUCCESS".equals(tradeStatus) || "TRADE_FINISHED".equals(tradeStatus);
+            BigDecimal amount = parseAmount(node.path("total_amount").asText(null));
+            if (paid) {
+                return new QueryResult(QueryOutcome.PAID, outTradeNo, tradeNo, amount, tradeStatus, null);
+            }
+            // WAIT_BUYER_PAY（用户还站在收银台前）/ TRADE_CLOSED（已关闭）：都是「还没成」
+            return new QueryResult(QueryOutcome.NOT_PAID, outTradeNo, tradeNo, amount, tradeStatus,
+                    "支付宝交易状态：" + tradeStatus);
+        }
+        if ("40004".equals(code) && "ACQ.TRADE_NOT_EXIST".equals(subCode)) {
+            return new QueryResult(QueryOutcome.NOT_PAID, outTradeNo, null, null, null,
+                    "支付宝侧查无此交易（用户未到收银台，或交易已过期）");
+        }
+        // 不认识的业务码：不敢下任何结论
+        return QueryResult.unavailable("支付宝查单返回 code=" + code + " sub_code=" + subCode);
+    }
+
+    /** 金额解析失败返回 null（由 Service 层按「金额不可信」处理，绝不退化成 0 去比大小） */
+    private BigDecimal parseAmount(String text) {
+        if (text == null || text.isBlank()) {
             return null;
         }
-        return node.path("trade_status").asText(null);
+        try {
+            return new BigDecimal(text);
+        } catch (NumberFormatException e) {
+            log.warn("[pay] alipay amount unparsable: {}", text);
+            return null;
+        }
     }
 
     /* ==================================================================
