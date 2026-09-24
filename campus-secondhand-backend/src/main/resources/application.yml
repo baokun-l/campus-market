@@ -94,22 +94,25 @@ spring:
       write-dates-as-timestamps: false
 
   # ---- Spring AI 配置 ----
-  # ★ 默认这里是「占位 key + 公网地址」，国内直连 api.openai.com 会连接超时 ★
-  # 实测一次 /ai/chat 会重试到 ~40 秒才失败，远超前端 axios 的 15 秒超时，
-  # 用户先看到「请求超时」而后端还在傻等。
-  #   - max-attempts 压到 1：失败就立刻走 AiAssistantService 的模板降级，不叠加等待；
-  #   - 要用真实 AI：设置环境变量 OPENAI_API_KEY 与 OPENAI_BASE_URL
-  #     （base-url 指向可访问的兼容端点，如国内中转/自建网关）。
+  # ★★ 本项目**不使用** Spring AI 的 OpenAI 自动配置 ★★
+  #   三家供应商（DeepSeek / 千问 / OpenAI 兼容端点）由 AiProviderConfig 统一装配成
+  #   一条**有序降级链**，作为唯一的 ChatModel bean 暴露给业务代码。
+  #   为什么必须排除自动配置：若它同时存在，类路径上就会有第二个 ChatModel bean，
+  #   而 AiAssistantService 是按接口注入的 —— 那时「实际走了谁」取决于条件注解与
+  #   @Primary 的组合，属于不可接受的不确定性（正是本项目反复在修的形态）。
+  #   ⇒ 原 spring.ai.openai.* 已移除：它是一个概念的第二条配置路径。
+  #     OpenAI 的凭据改到 app.ai.openai.* 下，与其它供应商同一套写法（见下面 app.ai 段）。
   ai:
     retry:
+      # 不重试：失败立刻降级到链上的下一个供应商，不叠加等待。
+      # 读取处是 AiProperties#maxAttempts，由它转发给链上每个供应商 —— 只有一个来源。
       max-attempts: 1
-    openai:
-      api-key: ${OPENAI_API_KEY:sk-placeholder}
-      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
-      chat:
-        options:
-          model: gpt-3.5-turbo
-          temperature: 0.7
+
+  # 排除 OpenAI 自动配置。★ 被排除的类必须在类路径上，否则启动直接报错 ★
+  # （spring-ai-openai-spring-boot-starter 提供该类，所以这里写得出来是「安全的」）
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.autoconfigure.openai.OpenAiAutoConfiguration
 
 # ---- 图片上传配置 ----
 # ★ 为什么商品图必须走「上传拿 URL」，而不是前端把 base64 塞进请求体 ★
@@ -121,6 +124,48 @@ spring:
 # 改成上传落盘后，库里只存 /uploads/2026/09/xxxx.jpg 这样的短路径，
 # 列宽够用、图片可被浏览器缓存、商品列表接口也不必再搬运几百 KB 的 base64。
 app:
+
+  # ---- AI 供应商降级链（P1-14）----
+  # ★★ 变量名必须带 APP_ 前缀 ★★
+  #   app.ai.deepseek.api-key  ←→  APP_AI_DEEPSEEK_API_KEY
+  #   少写 APP_ **不会报错，只是绑不上**：该供应商不进链；若全都没配上，
+  #   每条 AI 回复都会变成 AiAssistantService 的模板文案（不报错，只在启动期 WARN）。
+  #   ★ 这与支付那段踩过的坑是同一形态，所以 deploy/env.example 里把每个名字都列出来供照抄 ★
+  #
+  # ★ 链的顺序即优先级 ★ 抛异常或返回空响应都会自动落到下一个供应商。
+  # ★ base-url 末尾**不要带 /v1** ★ 完整地址 = base-url + completions-path。
+  #   两家的根地址口径不一样（DeepSeek 不带 /v1、DashScope 兼容模式要带），
+  #   所以各自写全、由 completions-path 统一补 /v1/chat/completions，不要凭印象改。
+  # ★ api-key 在 yml 里**没有真值**（默认空串），只认环境变量 —— key 泄露等于别人刷你的账单 ★
+  ai:
+    # 尝试顺序，从左到右。认不出的名字会被忽略，但会在启动日志里点名。
+    # 要把 OpenAI 也排进来就写成 deepseek,qwen,openai（并打开下面的 openai.enabled）
+    chain: deepseek,qwen
+    # 采样温度（0.7 = 原来的值）。非法值一律退回 0.7：温度没有「不限」这个语义。
+    temperature: 0.7
+    # 出站路径。★ 显式给出，不依赖框架默认 ★（默认值变了只会得到一句 404，看不出因果）
+    completions-path: /v1/chat/completions
+
+    deepseek:
+      enabled: true
+      base-url: https://api.deepseek.com
+      api-key: ""
+      model: deepseek-chat
+
+    qwen:
+      enabled: true
+      # 阿里云百炼的 OpenAI 兼容模式；/v1 由 completions-path 补
+      base-url: https://dashscope.aliyuncs.com/compatible-mode
+      api-key: ""
+      model: qwen-plus
+
+    openai:
+      # 默认关闭且不在链里（国内网络下 api.openai.com 通常连不上，见 AiHttpClientConfig）
+      enabled: false
+      base-url: https://api.openai.com
+      api-key: ""
+      model: gpt-3.5-turbo
+
   # ---- 日志落盘目录（滚动/保留策略见 logback-spring.xml）----
   # 相对路径按「后端进程的工作目录」解析，本地默认落在 uploads/ 旁边的 logs/（已被 .gitignore 忽略）。
   # 生产用 LOG_DIR 指到源码树之外（见 application-prod.yml），与上传目录同理：
