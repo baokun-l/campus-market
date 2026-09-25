@@ -758,3 +758,111 @@ B6 的 L9 判据差点栽在这 —— **本轮新写的注释故意写了旧写
 于是**重复跑就再追加一份 ADD**，静默产生重复节（部署清单的 ④⑤⑥ 真的被追加了两遍，靠 `grep -c` 才发现）。
 ⇒ 规则细化为：**幂等判定要锚「ADD 里独有的句子」，绝不能锚 OLD**；
 且**销项脚本的自证里要把「不重复」本身当成一条判据**（本轮补了 `④⑤⑥ 只有一份`、`§7.11 只有一节`）。
+
+## P. 2026-09-24 迁出：AI 降级链（P1-14）· 判据锚错对象第 4/5 种 · 产物取用
+
+> 本节由主文件（MEMORY.md）2026-09-24 第三次压缩时迁出。主文件只留一句话，机制全文在此。
+
+### P1. AI 多供应商降级链的实现形态（主文件 §一 🤖）
+
+- **目标**：智能客服 / 商品描述由「单供应商」改为 **DeepSeek → 千问（DashScope）→ 模板** 三级降级。
+- **三件套**：`config/AiProperties`（读 `app.ai.*`）+ `service/ai/AiProviderChain implements ChatModel`（装饰器）+ `config/AiProviderConfig`（装配）。
+  ★ **`AiAssistantService` 一行未改** —— 它只注入 `ChatModel`，链在 bean 层面替换。这就是「装饰器」的价值：新能力不污染业务。
+- **绝不引新 starter**：复用 `spring-ai-openai` 的 `OpenAiApi` / `OpenAiChatModel`。DeepSeek 与 DashScope 都提供
+  **OpenAI 兼容**端点，所以同一套客户端够用。**M6 与 GA 的 `spring-ai-*` 包结构不同**，引 GA starter 会撞包名。
+- ★ **必须 `spring.autoconfigure.exclude` 掉 `OpenAiAutoConfiguration`**：否则容器里会多出第二个 `ChatModel` bean，
+  注入点二义（`NoUniqueBeanDefinitionException` 或静默注错）。
+- ★ **加一家供应商 = 加 `AiProperties` 一个字段 + `KNOWN_PROVIDERS` 加一项**。漏加 `KNOWN_PROVIDERS` 的后果是
+  **静默丢弃**（被当 unknown 跳过，日志不报错，只是永远不参与降级）；`GET /ai/providers` 会把它列进 `unknown`。
+- ★ 环境变量**必须带 `APP_` 前缀**：`APP_AI_DEEPSEEK_API_KEY` / `APP_AI_QWEN_API_KEY`（与 `APP_PAY_*` 同坑，见 N2）。
+- ★ 观测端点 `GET /ai/providers` **只报 `keyConfigured: true/false`，绝不回显 key**；返回
+  `{chain, available[], missing[], unknown[], providers[]}`。
+- ★ `quotaGuard.acquire()` **必须在 try 之外**（AI 配额闸门在拼 prompt 之前、降级 try 之外）。
+  理由：若放进 try，限流被降级链吃掉 ⇒ 用户看到「降级后的回复」而不是「限流」，**限流静默失效且无人察觉**。刻意设计，别动。
+- ★ 出站超时在 `AiHttpClientConfig`：**连接 3s / 读 8s**，压在网关/前端 15s 之内，保证降级能在用户耐心耗尽前跑完。
+- ★ **`stream()` 只走链首、不降级**（业务未用流式）；不要以为流式也享受降级。
+- ★★ **AI key 缺了不报错，只是全程回模板**（与支付渠道同口径的「失败关闭」）⇒ 部署时最容易漏配。
+  **但绝不要为此把 `DeploymentGuard` 改成 fail-fast**：AI 是非关键功能，「缺 key 就拒启动整个集市」代价远大于降级；
+  支付 key 才值得 fail-fast —— **两者不是同一类依赖**。现形态 = 启动 WARN（`AiProviderConfig` 点名变量名）+ `/ai/providers`。
+- ⚠️ **真实 key 从未跑过**：三层真机打的是**本地假端点**，证的是「链的行为」（顺序/降级/兜底），不是「真供应商连通」。
+  ⇒ 上线注入真 key 后**必须再验一次**（打 `/api/ai/providers` 看 `available` 是否含 deepseek/qwen）。
+- 验证账目：单测 11/11 · 全量 537/537 · 真机 `probe-ai-chain-live.mjs` **17/17** ·
+  红绿对照（**旧 jar 3/17 ↔ 新 jar 17/17**）· 真实端点形状 **2/2**（见 P4）。
+
+### P2. 第四种「锚错对象」：锚「整行里有没有某个列名」⇒ 假红
+
+真机判据曾用「日志整行含 `update_time`」来识别「对账闭合段查询」。但 `update_time` 是 `t_payment` 的**列**，
+出现在**每一条** `select` 的 SELECT 列表中 ⇒ **paying 段也被判成闭合段**，读到的是 paying 段的 `Total`
+（账面上 `closedTotal=2` 其实是 paying 段的 2 笔）。
+
+⇒ 正解：**只锚 WHERE 子句形状**（`AND update_time >= ?` / `AND expire_at IS NOT NULL`），
+并用状态机配对（「读到 `Preparing:` 记形状 → 紧随其后的 `Total:` 归它」）。
+★ 不能用「往后找 N 行」——那会误收 `selectById` 的 `Total`。
+
+### P3. 第五种「锚错对象」：yml 里同名键不止一个 ⇒ 必须逐层截块
+
+`application.yml` 里有**两个 `ai:`**：`spring.ai.retry`（第 105 行）与 `app.ai`（第 140 行）。
+判据若用 `/^ {2}ai:$/m` 全局匹配，命中的是**前者** ⇒ 判据退化成「有没有 `spring.ai` 段」，
+与要验的能力毫无关系，且**看起来完全正常**（这次是最危险的一次：判据恒绿但不测任何东西）。
+
+正解：
+
+```js
+const appBlock = (ymlRaw + '\nZZZ_END:\n').match(/^app:\s*$([\s\S]*?)(?=^[A-Za-z])/m);
+const aiBlock  = (appBlock + '\n  ZZZ_END:\n').match(/^ {2}ai:\s*$([\s\S]*?)(?=^ {2}\S)/m);
+```
+
+- **先截父段再截子段**；
+- ★ **末节必须加哨兵键**：lookahead 找不到「下一节」时整块会变空 ⇒ 判据恒红或恒绿（都是撒谎）。
+- 同族易踩：`spring.upload` vs `app.upload`、`spring.login` vs `app.login-guard`。
+- ⇒ 已收录进 skill `red-green-probe` 的「探针自己会撒谎」表，形态 **⑨**。
+
+### P4. 产物取用与 jar 自检（真机红绿的前提）
+
+- ★★★ **`dist` 下所有 jar 的 `mtime` 被规整成同一时刻**（`2026-01-01T00:00:00Z`）⇒
+  **「按 mtime 取最新产物」＝按 readdir 顺序取**，会**静默跑起旧 jar**。
+  本轮真踩：误跑 `0494149`，启动日志里**没有** `[ai] provider registered` 那行，差点去改正确的代码。
+  ⇒ 只能**解析文件名末尾 12 位时间戳**排序：`/^campus-market-.*-(\d{12})\.jar$/`。
+  ⇒ 已修 `start-backend-ai.mjs`；并加 `--jar=<关键词>`（红绿对照钉旧包）与 `--plain`（不覆盖 AI 配置，恢复现场）。
+- ★★ **换产物后必须先在启动日志里找到「新组件那一行」**（如 `[ai] chain registered: [deepseek, qwen]`）才算换成功，
+  **别信文件名**。
+- ★★ **判断「jar 里有没有某修复」必须解压后搜**：`.class` 是 deflate 压缩的，裸字节搜**必假红**。
+  脚本：`.workbuddy/tmp/jar-probe.mjs`、`jar-check-ai.mjs`，**必须带阳性对照**（同脚本对新旧两包应有不同结论）。
+- ★★ **业务 class 在 `BOOT-INF/classes/` 前缀下**：不带前缀查 = 0 命中 = **把「有」误判成「没有」**。
+  嵌套依赖要**解出内层 jar 再列目录**（如 `OpenAiAutoConfiguration.class` 在 `spring-ai-spring-boot-autoconfigure-1.0.0-M6.jar`
+  —— M6 是**集中式** autoconfigure，不是每个 provider 一个包）。实测：新 jar **11/11 OK**，旧 jar **10 MISS**。
+- ★ **构建可复现已经证实**：`…-4d8470b-202609240234.jar` 与「脏树构建」的 `…-2b5edf0-202609240219.jar`
+  **sha256 完全相同**（`a2980ba01e801a01afc502c38dc17ee9ece6c9840e9a4279c71c1698fb2e146c`）
+  ⇒ **产物内容确等于该 commit**，反证「验证过的产物 = 验证过的源码」。
+  ★ 但**发版必须从 clean 工作区**（脏树只警不拦，`deploy/build-release.mjs` 第 177 行）。
+- ★ 真实端点形状探针：用**故意无效的 key** 打 `https://api.deepseek.com/v1/chat/completions` 与
+  `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` —— **401 = 路径形状正确**，
+  404 = 形状错（如 `/v1/v1` 重复），200 = 鉴权被绕过。实测 **2/2 均 401**。
+  脚本 `.workbuddy/tmp/probe-real-endpoints.mjs`。
+
+### P5. 「距部署多远」= 28 项判据（`audit-deploy-gap.mjs`）
+
+- 09-24 10:52 实测：**合计 28 项，已完成 28，未完成 0，无法判定 0** ⇒ **代码侧 100% 就绪**。
+- ★ 这 28 项里第 28 项（**P1-14**）是补出来的：加完 AI 链后审计仍报「27/27」，
+  而 AI 键是**必须配**的部署项 ⇒ 不补就等于**审计自己制造了一个盲区**（详见每日日志 §十二）。
+  判据锚「能力」：`app.ai` 配置面 ≥2 家（**逐层截块**，见 P3）· `KNOWN_PROVIDERS` 含 deepseek+qwen ·
+  `implements ChatModel` 且**逐个遍历** · 空/空白回复算失败（`text != null && !text.isBlank()`）·
+  自定义退出异常 · `env.example` 记齐 `APP_AI_*`。
+  ⇒ 判据红绿同步由 31 轮扩到 **33 轮**（R30 突变「空回复算成功」必须翻红；R31 在类声明前插一段抄判据文案的注释**必须不翻红**，守 `javaCode()` 剥注释）。
+- **剩余全在「拿到机器/域名」之后**（人工事项，代码已备好）：
+  ① 装 Nginx + TLS；② 建 `campus_app` 库并降权；③ 填 `/etc/campus-market/env`（`JWT_SECRET` / `DB_PASSWORD` /
+  支付宝三项 / `APP_PAY_PUBLIC_BASE_URL` / **`APP_AI_DEEPSEEK_API_KEY` + `APP_AI_QWEN_API_KEY`**）;
+  ④ 存量库跑 `src/main/resources/db/upgrade-payment.sql`；⑤ 定时备份 + 告警；⑥ **配远端或定打包交付**。
+- ★ `deploy/` 五件齐：`build-release.mjs` · `campus-market.service` · `nginx-*.conf` · `campus-proxy-headers.conf` · `env.example`。
+- ★ db 脚本在 **`src/main/resources/db/`**（不是仓库根 `db/`）。
+- ★ 业务功能只差「机器 + 域名 + env」；**支付渠道**额外等公网 https 域名。
+- ★ **上线排障先打两个观测端点**：`GET /pay/channels`（渠道在不在）、`GET /ai/providers`（AI 键配没配上）。
+  两个都**不看配置、不看日志**，只看「用户会看到什么」。
+- ★ **仓库无任何远端** ⇒ 交付链路仍缺（产物进服务器没有既定路径）。
+
+### P6. 同日收口的三件事（一句话版）
+
+- **B9C**：`favorite_count` 改为真实计数（不再是装饰性大数字段）。
+- **B9D / D11**：用户「待审核」死状态**整体拆除** —— 用户只剩 `active` / `banned` 两态。**勿再引入用户 pending**。
+- **D9（已于 B8 关闭）**：真实凭据在 **HttpOnly Cookie**，前端 `localStorage` 只准存 sessionHint，**勿回流**。
+- ⚪ 别再当待办：**M8（错误一律 200）是契约** · 「退出不清购物车」是误判 · P1-11 / P2-3 / D9 已关。

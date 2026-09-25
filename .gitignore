@@ -36,6 +36,13 @@ logs/
 Thumbs.db
 desktop.ini
 
+# ---------- 提交物（作业交付物：源码 zip + 报告 pdf）----------
+# 属于「交付产物」而不是源码：体积是二进制级（数 MB），且每次交作业都会整体重建，
+# 进库只会让每次 diff 都变成一大坨二进制。报告正文与其配图的可编辑源保存在
+# .workbuddy/tmp/report-task3/（临时目录，不进库），生成管线见 skill
+# `submission-pack-and-report`。
+提交物/
+
 # ---------- 敏感配置兜底 ----------
 .env
 .env.local

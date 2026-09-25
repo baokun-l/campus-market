@@ -1,81 +1,63 @@
-# 校园二手集市 · 长期记忆（红线速查）
+# 校园二手集市 · 红线速查
 
-> 正本：后端 `campus-secondhand-backend`（勿用 `test\*`）；前端正本=实践任务2、副本=实践任务3，
-> 改了立刻回流（`sync-front.mjs --from=t2|t3`，**无默认方向**）再 `sync-check.mjs`。
-> 栈：Spring Boot 3.2.5 + MyBatis-Plus 3.5.6 + MySQL8 + JWT + JDK17。冲突时**以本文件为准**。
-> ★★ **只留「忘了就出事」的一条；全文·机制·命令在 `memory/APPENDIX-规则细节.md`**，按节查：
-> **§二→N1~N6 · §三→L1 · §四→L2 · §五→L3 · §六→L4 · §七→L5 · §八→L6**；另 A 工具坑 · B/C 探针 ·
-> D/E 记账 · F/H/I 红绿撒谎（**H 到⑫**）· G1–G6 · J AI · K 健康检查 · M 上传 · M6/N2 判据自骗 · **O 判据红绿全量**。
-> ⚠️ 某节变短 ≠ 没写过，那是**已迁 APPENDIX**（本文件会被注入截断，尾部最危险）。
-> 逐轮细节 → `memory/2026-09-*.md` · `后端设计说明.md`（附一～二十八）· `项目缺陷检查与修复清单.md`（二十九）·
-> `缺陷清单逐条核对报告.md`（二十三）。
+> 后端正本 `campus-secondhand-backend`（勿用 `test\*`）；前端正本=实践任务2、副本=实践任务3，改后立刻回流
+> （`sync-front.mjs --from=t2|t3`，**无默认方向**）再 `sync-check.mjs`。栈：Spring Boot 3.2.5 + Spring AI **1.0.0-M6**
+> + MyBatis-Plus 3.5.6 + MySQL8 + JWT + JDK17。冲突时以本文件为准。
+> ★★ 本文件**只留「忘了就出事」的一句**，机制全文在 `memory/APPENDIX-规则细节.md`（A–O 分节）：
+> **§一🤖→P1 · 锚错对象→P2/P3 · 产物取用→P4 · 部署距离→P5 · §二→N · §三→L1 · §四→L2 · §五→L3 · §六→L4 · §七→L5 · §八→L6**。
+> ⚠️ 某节变短 ≠ 没写过（**已迁 APPENDIX**）。逐轮细节 → `memory/2026-09-*.md`。
 
 ## 一、进度（09-24）
 
-- ✅ 已修 17 批（B0…B9D；B9C = favorite_count 真实计数·三十，B9D = D11 待审核死状态整体拆除·三十一）
-- 📊 基线：后端 **537/537**（526 + P1-14 新增 11） · 前端 **723/723** + `vue-tsc` 0 错 · 部署缺口审计 **28/28 全通过** · 判据红绿 **33/33** · probe-p111 **26 用例/9 轮**（B8 cookie 用例已回灌；P1-11 阈值 ≥5）；对账轮红绿 **对照组+6 突变 ALL PASS**（**M5/M6 各只红自己那两条、两集合不重叠**）；对账真机判据 **7/7** + **判据自证**（同一套断言指向修前日志 ⇒ 4/7 红）；AI 链真机 **17/17** + 红绿对照 **旧 jar 3/17 ↔ 新 jar 17/17** + 真实端点形状 **2/2**（见 §一 🤖）
-- 🏭 仓库：**git 已建**（main @ **4d8470b**，工作树 clean）；✅ **真机全流程回归全绿（148 PASS/0 FAIL·五探针，账本 §三十三）**；★ **无任何远端 ⇒ 交付链路仍缺**（产物进服务器无既定路径）；✅ **jar 的 `revision` 已对齐源码**：`…-4d8470b-202609240234.jar`，★ 它与「脏树构建」的 `…-2b5edf0-202609240219.jar` **sha256 完全相同**（`a2980ba0…`）⇒ **构建可复现、产物内容确等于该 commit**；⇒ 发版**必须从 clean 工作区**（脏树只警不拦，`build-release.mjs` 第 177 行）；★ **判断「jar 里有没有某修复」必须解压后搜**（`.class` deflate 压缩，裸字节搜必假红；`.workbuddy/tmp/jar-probe.mjs`、`jar-check-ai.mjs`，须带阳性对照；★★ **业务 class 在 `BOOT-INF/classes/` 前缀下**，不带前缀查＝0 命中＝**把「有」误判成「没有」**；嵌套依赖要解出内层 jar 再列目录）
-- 📦 **部署距离（09-24 10:52 实测）**：`audit-deploy-gap.mjs` **28/28（0 未完成·0 无法判定）** ⇒ **代码侧 100% 就绪**；剩余**全在「拿到机器/域名」之后** —— ①装 Nginx+TLS、②建 `campus_app` 并降权、③填 `/etc/campus-market/env`（`JWT_SECRET`/`DB_PASSWORD`/支付宝三项/`APP_PAY_PUBLIC_BASE_URL`/**`APP_AI_DEEPSEEK_API_KEY`+`APP_AI_QWEN_API_KEY`**）、④存量库跑 `upgrade-payment.sql`、⑤定时备份+告警、⑥**配远端或定打包交付**；★ `deploy/` 五件齐（`build-release.mjs`·`.service`·`nginx-*.conf`·`campus-proxy-headers.conf`·`env.example`）；★ db 脚本在 **`src/main/resources/db/`**（非仓库根 `db/`）；★ 业务功能只差「机器+域名+env」，**支付渠道**额外等公网 https 域名；★ **上线排障先打观测端点**：`GET /pay/channels`（渠道在不在）、`GET /ai/providers`（AI 键配没配上）—— 两个都**不看配置、不看日志**，只看用户会看到什么
-- ★★★ **AI key 缺了**不报错、只是**全程回模板**（与支付渠道同口径的失败关闭）⇒ 别漏配。**但绝不要为此把 `DeploymentGuard` 改成 fail-fast**：AI 是非关键功能，「缺 key 就拒启动整个集市」的代价远大于降级；支付 key 才值得 fail-fast —— **两者不是同一类依赖**。现形态 = 启动 WARN（`AiProviderConfig` 点名变量名）+ `/ai/providers`
-- 🤖 **AI 助手（智能客服 / 商品描述）：已落地「DeepSeek → 千问 → 模板」降级链（P1-14，4d8470b）。** 三件套：`AiProperties`（读 `app.ai.*`）+ `AiProviderChain implements ChatModel`（装饰器）+ `AiProviderConfig`；**`AiAssistantService` 一行未改**（只注入 `ChatModel`）。★ 复用 `spring-ai-openai` 的 `OpenAiApi`/`OpenAiChatModel`（DeepSeek 与 DashScope 都提供 **OpenAI 兼容**接口）⇒ **绝不引新 starter**（M6 与 GA 的 `spring-ai-*` 包结构不同，引 GA starter 会撞包名）；★ **必须 `spring.autoconfigure.exclude` 掉 `OpenAiAutoConfiguration`**（否则多出第二个 `ChatModel` bean）；★ **加供应商＝加 `AiProperties` 字段 + `KNOWN_PROVIDERS` 一项** —— 漏加 `KNOWN_PROVIDERS` 会被当 unknown **静默丢弃**（`/ai/providers` 会报 `unknown`）；★ 环境变量**必须带 `APP_` 前缀**（`APP_AI_DEEPSEEK_API_KEY`/`APP_AI_QWEN_API_KEY`），同 `APP_PAY_*` 坑；★ 观测端点 `GET /ai/providers` **只报 `keyConfigured`、绝不回显 key**；★ `quotaGuard.acquire()` **必须在 try 之外**（否则限流被降级吃掉、无人察觉）——刻意设计，别动；★ 出站超时在 `AiHttpClientConfig`（**连接 3s / 读 8s**，压在前端 15s 之内）；⚠️ **真实 key 从未跑过**（三层真机打的是本地假端点，证的是「链的行为」）⇒ 上线注入 key 后需再验一次；`env.example` 已补全套 `APP_AI_*`；`stream()` 只走链首**不降级**（业务未用流式）
-- ✅ **D-ALIPAY 已收官（真机闭环·账本 §三十四）**：主动对账兜底真机生效，`20260923233755355000`（★ 这是**订单号**；支付单号是 `pay_20260923233755539000`，其 `expire_at`=**2026-09-24 13:37:55** 就是那个「硬点」——**已在其前 4.9 小时结算**，不必再等 13:37）已于 08:41:03 结算成 `pending_ship`（`pay` → `success`，回填支付宝真实交易号 `2026092322001453090509431001`）；
-  真机三层证据：对账首轮 `checked=3 settled=1` + 后续 11 轮 `checked=2 settled=0`（仅 1 条 settled、0 ERROR）· 接口层 **15/15** · 缺陷④ 两层探针 **4/0 + 9/0**；
-  ★ 长期真机对照：`pay_20260923230310911000`、`pay_20260923232542706000` 两笔保持 `paying`／订单 `pending_payment`（**未付款的绝不能被误推进**）
-  · ✅ **34.9 登记的最后一道口子已闭合（账本 §34.10）**：对账候选新增「**`closed` 且 `update_time` 在回看窗口内**」一类（`app.pay.reconcile-lookback-minutes` 默认 **10，必须 > 关单周期 5 分钟**），且 `reconcileOne` 的闸门同步放宽到 `closed` —— ★ **只改候选不改闸门＝静默失效**（一笔都进不来）；只改闸门不改候选＝永远没候选。真机夹具 A（关单 3 分钟前）/B（关单 60 分钟前）对照：`checked=3 payingTotal=2 closedTotal=1`，A 穿过闸门、B 不出现、两笔零副作用
-  · （favorite_count 已落地 B9C；D11 已拆链 B9D：用户只剩 active/banned 两态，**勿再引入用户 pending**；D9 已于 B8 关闭——真实凭据在 HttpOnly Cookie，前端 localStorage 只准存 sessionHint，**勿回流**）
-- ⚪ 别再当待办：**M8（错误一律 200）是契约** · 「退出不清购物车」误判 · P1-11/P2-3/D9 已关
+- 📊 后端 **537/537** · 前端 **723/723**+`vue-tsc` 0 错 · 部署审计 **28/28** · 判据红绿 **33/33** · 真机回归 **148/0** · AI 链真机 **17/17**（旧 jar 3/17 ↔ 新 17/17）
+- 🏭 git main @ **05ec62d** 树 clean、**无远端**；构建可复现已证（异工作区同 sha256）⇒ 发版**必须从 clean 工作区**；📦 代码侧 100% 就绪，剩余在「拿到机器/域名」之后 → P5
+- 🤖 **AI「DeepSeek → 千问 → 模板」降级链已落地（P1-14）** → P1。★★ **key 缺了不报错、只全程回模板**（最易漏配）；
+  **但绝不为此把 `DeploymentGuard` 改成 fail-fast** —— AI 非关键、支付 key 才值得。⚠️ 真 key 从未跑过，上线后再验
+- ✅ **D-ALIPAY 收官**（§三十四）：对账兜底真机生效、关单后到款能救回、未付款单长期 `paying` 未被误推进
+- ⚪ 别再当待办：**M8（错误一律 200）是契约** · 「退出不清购物车」误判 · P1-11/P2-3/D9 已关 · 用户只剩 active/banned
 
-## 二、验证纪律（★ 最易放松 → N）
+## 二、验证纪律（★ 最易放松）
 
 - **三层缺一不可：单测 → 红绿（必须报红）→ 真机**；只报「绿」不算证明
-- ★★★ **判据锚「能力」不锚「手段/字样」**；**剥注释必须跟踪块注释状态**（⇒ 不剥=自骗）
-- ★★★ **最坏的失败是脚本/配置自己撒谎**：逐行判断、「同一函数体内」（**括号配平**）、**脚本自证**（锚点恰 1 次，否则退 2）、回填幂等
-- ★★★ **一轮突变只验一个可观测后果** ⇒ 拆轮，每轮同时点名「必须红」与**「必须仍绿」**；**没报红时先查突变是否真移除了能力，别先改断言**（→ M3）
-- ★★ 断言**不许靠调度运气**；**次序判据 > 计时判据**；「两次结果相同」≠可复现 ⇒ 补**对照组**；**安全项必须「两组都为真」**；**报红先怀疑断言对象** → N5/N6
-- ★★ **「改了配置没反应」先查值有没有到达变量**（缺 `APP_` 前缀 / 占位符名≠代码键名 / **死配置**）→ N2 
-- ★★ 真机红绿**锚不可变产物**（靠「jar 里有没有新 class」自证；取产物按 12 位时间戳）；**注册型扩展点必须真机验证注册链路** → N3/N4
-- ★★★ **`dist` 里所有 jar 的 `mtime` 被规整成同一时刻**（`2026-01-01T00:00:00Z`）⇒ **「按 mtime 取最新产物」＝按 readdir 顺序取，会静默跑起旧 jar**（本轮真踩：误跑 `0494149`，日志里没有 `[ai] provider registered`，差点去改正确的代码）⇒ 只能**解析文件名末尾 12 位时间戳**排序；★★ **换产物后必须先在启动日志里找到「新组件那一行」**才算换成功，别信文件名
-- ★★ **判据红绿是「全绿」唯一的解药**：改判据必跑 `.workbuddy/probe-audit-criteria-redgreen.mjs`（**33 轮**，随 P1-14 由 31 扩）；
-  全绿分不清「能力在」与「判据恒真/锚文案/被注释满足」⇒ 形态 **⑩⑪⑫**（→ H/O）；★ 销项脚本幂等锚「新内容独有句」→ O4
-- ★★ **「锚错对象」三连**（同一回合全踩过）：①只断言「方法被调用」⇒ 条件被收紧照样绿；②锚 `getParamNameValuePairs()` 里有没有某个值 ⇒ **假红**（MP 把 `set()` 值放进去，`eq()/in()` 的值**拿不到**）⇒ 改锚**渲染出的 SQL 结构**（如 IN 子句占位符个数），并把参数表 dump 进失败消息；③判据**假借别的分支**通过（Jackson `path()` 缺键返回 **MissingNode 而非 null** ⇒ `node==null` 守卫永不成立）⇒ 每条判据必须有**自己的出口**，红绿探针时能各自被单独证伪
-- ★★★ **第四种「锚错对象」：锚「整行里有没有某个列名」⇒ 假红**。真机判据曾用「整行含 `update_time`」识别「闭合段查询」，而 `update_time` 是 `t_payment` 的**列**、出现在**每条**查询的 SELECT 列表里 ⇒ paying 段也被当成闭合段，读到的是它的 `Total`（`closedTotal=2` 其实是 paying 段的 2 笔）。**只锚 WHERE 子句形状**（`AND update_time >= ?` / `AND expire_at IS NOT NULL`），并用「Preparing 记形状 → 紧随的 Total 归它」的状态机配对（「往后找 N 行」还会误收 `selectById` 的 `Total`）
-- ★★★ **第五种「锚错对象」：yml 里同名键不止一个 ⇒ 必须逐层截块**。`application.yml` 里有**两个 `ai:`**（`spring.ai.retry` 第 105 行 与 `app.ai` 第 140 行）⇒ 用 `/^ {2}ai:$/m` 全局匹配命中的是**前者**，判据就退化成「有没有 `spring.ai` 段」，与要验的能力毫无关系（且**看起来完全正常**）。正解＝**先截父段再截子段**（`app:` → 其中的 `ai:`），并给末节加一行哨兵键保证「最后一节」也收得住（否则 lookahead 找不到下一节，整块变空 ⇒ 判据恒红或恒绿）。同族易踩：`spring.upload` vs `app.upload`、`spring.login` vs `app.login-guard`
-- ★★★ **改完判据必须证明它还能红**：把**同一套断言**指向**修前**的证据（旧日志段）⇒ 必须报红（本轮实得 4/7 红）。「改完全绿」不构成证据 —— 从假红换到恒真也是全绿。判据探针要支持**时间窗**（`since` + `until`），否则永远只能看最新那段、无法回头对修前取证；★ **窗口必须收在一次验证会话之内**（窗口跨到「夹具已清理」的时段 ⇒ 报与实现无关的假红），且**两次跑（绿灯/自证）的证据文件必须分开命名** —— 覆盖后会出现「名叫 AFTER 的文件装着 BEFORE 内容」，**留档撒谎比没留档更坏**
-- ★★★ **`finally` 挡不住硬杀（SIGTERM／超时／关窗口）⇒ 突变会留在源码里**。本轮真踩：一次误触发的重跑被杀，恰好停在「把 `closed` 从 `settle` 条件更新里摘掉」那一轮，而**源码看起来完全正常**（无 `MUTATED` 标记、语法完好）⇒ **只有 `git diff` 逐行比对才看得出**。⇒ 红绿探针必须**留底 + 启动自愈**（`.redgreen-backup/`：开跑前留底、发现上次留底先无条件还原、完整跑完才删留底、再加一条全局还原校验）；**硬杀之后别只信哈希自检，用 `git diff` 复核语义**
+- ★★★ **判据锚「能力」不锚「手段/字样」**，剥注释必须跟踪块注释状态；**最坏的失败是脚本/配置/工具自己撒谎**
+  （shim bash 无 `cat`/`grep`/`mkdir`…，`|| echo "(无 X)"` 把「命令不存在」伪装成「文件不存在」）⇒ 逐行判断 + 脚本自证
+- ★★ **「改了配置没反应」先查值有没有到达变量**（缺 `APP_` 前缀 / 占位符名 ≠ 代码键名 / 死配置）
+- ★★ **一轮突变只验一个后果**，同时点名「必须红」与**「必须仍绿」**；**没报红先查突变是否真移除了能力，别改断言**
+- ★★ 真机红绿**锚不可变产物**；**换产物后必须在启动日志找到「新组件那一行」**才算成功；注册型扩展点必验注册链路
+- ★★★ **改完判据必须证明它还能红**（同一套断言指向修前证据）；「改完全绿」不构成证据
+- ★★★ **`finally` 挡不住硬杀** ⇒ 探针留底 + 启动自愈；硬杀后用 **`git diff` 复核语义**，别只信哈希自检
+- ★★★ **「锚错对象」五种**：①只断言方法被调用 ②锚 MP 参数表（假红）③假借别的分支 ④锚「整行有没有某列名」⑤**yml 同名键 ⇒ 逐层截块**（④⑤ → P2/P3）
 
-## 三、支付（→ L1 / G6）
+## 三、支付 → L1
 
-- ★★★ 订单**只能**被 `PaymentService#settle` 推进到已付款（全仓唯一入口）；渠道只动钱、不碰 `t_order`；回调**三道闸**（验签 → `app_id` → **金额逐分相等**）；`demo` prod 下无条件不可用；`User.balance` 是 `READ_ONLY` ⇒ **绝不接受请求体反序列化**
-- ★★★ **回调丢了必须有主动兜底**（真机已实发一次「付款成功但回调从未来」）：`PayChannel.query()` 四态 —— **「问不到」≠「没成」**，`UNAVAILABLE`/`NOT_PAID` 都**一个字都不许改**；查单响应**必须验签**；金额闸门与回调**同一条**；成功仍走**同一个 `settle`**（入口不许变宽）；对账任务**单独成类**（`@Scheduled` 与 `@Transactional` 同类 ⇒ 事务静默失效）+ 逐笔独立事务
-- ★★★ `settle` 可结算来源**必须含 `closed`**：`closed` 只代表「我们不再等了」，不代表「这笔没成」；排除它 ⇒ 关单后到达的款既不入账也不退回＝**无痕进账**。保留幂等靠条件更新（`affected=0` 才只覆盖 success/refunded/failed 三类真·重复投递）
-- ★★ **沙箱网关会间歇性返回 HTTP 404**（真机实测约 1/12，同一条链路前一次成功后一次 404）⇒ 这正是「问不到」的实物样本，**绝不能当「没成」**（否则把可能真付了钱的单标 `failed`，代价是钱）；实现里 404 归 `UNAVAILABLE`、响应验签失败也归 `UNAVAILABLE`
-- ★★★ **对账候选必须覆盖「刚被关掉的」这一段**：两个定时任务的交接处有条真空期 —— 未过期归对账、过期归关单，**而关单之后谁都不管**。用户在到期前最后一两分钟付款、通知又始终不来 ⇒ 那笔落到 `closed`，既不进候选也无待办＝**又一笔无痕进账**。正解＝候选加「`closed` 且 `update_time >= now - 回看窗口`」；★ 关单时刻的锚 **`t_payment.update_time` 依赖建表语句里的 `ON UPDATE CURRENT_TIMESTAMP`**（全仓**无** `MetaObjectHandler`/`FieldFill`，`closeExpired` 只 `set(status/failReason)`）⇒ **这个锚单测看不见**，删掉 DDL 那一句会让本分支**静默退化**成永远选不到候选；★ 顺序**先 closed 后 paying**（短窗口更稀缺，不能被长窗口挤掉批大小）
-- ★★ 真机要验「回调没来时能不能救回来」，**不能被 demo profile 挡住**：demo 是重置型，支付单在重置范围内 —— 一起就把待验证的卡单删了。默认 profile（不带 profile）才是「建表不重置」
+- ★★★ 订单**只能**被 `PaymentService#settle` 推进（唯一入口）；渠道只动钱不碰 `t_order`；回调**三道闸**（验签 → `app_id` → **金额逐分相等**）；`demo` prod 下无条件不可用
+- ★★★ **回调丢了必须有主动兜底**：**「问不到」≠「没成」**，`UNAVAILABLE`/`NOT_PAID` **一个字都不许改**
+- ★★★ `settle` 可结算来源**必须含 `closed`**；对账候选**必须覆盖「刚被关掉的」那段**（只改候选不改闸门＝静默失效）
 
-## 四、部署（→ L2 / G5；用户说**现在不用真部署**）
+## 四、部署 → L2
 
-- ★★ **demo 是重置型**（`DELETE` 四表重灌，**不是 DROP**）⇒ 三道机制：启动参数写死 prod + 打包排除 `demo-*.sql` + `--app.demo.reset-confirmed=true`；★ 别改坏：**错误一律 HTTP 200 + body 码** · `shutdown: graceful` · CORS `allowCredentials(false)`
+- ★★ **demo 是重置型**（`DELETE` 四表重灌，非 DROP）⇒ 启动参数写死 prod + 打包排除 `demo-*.sql` + 显式确认，三道缺一不可
+- ★ 别改坏：**错误一律 HTTP 200 + body 码** · `shutdown: graceful` · CORS `allowCredentials(false)`
 
-## 五、安全（→ L3 / G1·G2 / J / K / M）
+## 五、安全 → L3
 
-- ★★★ **鉴权快照缓存（P1-11）**：只缓 `status`/`role`/`token_version`、TTL=**10s 常量**；**改这三列必须 `invalidate`**（6 点 + 源码看守测试）；**别挪回直查**；**别按「动了 `t_user` 就清」**（心跳 60s 会冲干净）→ N5
-- ★★★ 其余红线**全文在 L3**，要点：AI `/ai/**` 的 `acquire` **在拼 prompt 前、降级 try 外** + 只用 `call(SystemMessage,UserMessage)` + 超长**拒绝不截断**；日志 `X-Request-Id` **攻击者可控** ⇒ **白名单校验**（`[A-Za-z0-9_-]{8,64}`，不合法**丢弃重生成**，不是转义）+ MDC 要 `finally`+`clear()`；上传 **闸门→非空→上限→魔数**、魔数**只读前 12 字节**、`window-seconds` 0→**1 秒**；`AuthInterceptor` 内部判定白名单、可见性 **404 非 403**、★ **单条防住批量也要过闸**；**禁快照回写** + **清空失效族**（MP `NOT_NULL` ⇒ 必须 `LambdaUpdateWrapper…set(X,null)`）；**台账/审计脚本都会撒谎** ⇒ 回代码逐条求证、匹配 yml 先剥 `${ENV:default}`
+- ★★★ **鉴权快照缓存**：只缓 `status`/`role`/`token_version`、TTL=**10s**；**改这三列必须 `invalidate`**（6 点 + 看守测试）
+- ★★★ AI `/ai/**` 的 `acquire` **在拼 prompt 前、降级 try 之外**；`X-Request-Id` **攻击者可控** ⇒ 白名单校验；
+  上传 **闸门→非空→上限→魔数**；不可见 **404 非 403**；**禁快照回写** + 清空必须 `LambdaUpdateWrapper…set(X,null)`
 
-## 六、接口契约（勿改 → L4 / G3·G4）
+## 六、接口契约（勿改）→ L4
 
-- `Result<T>={code,message,data}`；分页 `{list,total,page,pageSize}`（**`list` 非 `records`**）；错误码 `0`/`401`/`403`/`404`(不存在**或不可见**)/`500`(仅兜底)/`1001`(业务拒绝一律用它)/`1002`
-- ★ **登录路径是 `/user/login`，不是 `/auth/login`**（白名单 `PUBLIC_ANY` 里写的是前者）；打错路径的后果极隐蔽：不命中白名单 ⇒ 被拦截器拒 ⇒ 返回 `{"code":401,"message":"未登录"}`，**看起来像「密码错了」**
-- ★ **两个域两种越权口径、都刻意**：商品/资源「可见性」→ **404**（不暴露存在性）；**订单「归属」→ 403 + 「只有买家本人可以操作该订单」**（`OrderService#requireBuyer`，如实泄露「该单存在」）。写断言别把两者混用（混用必报假红）
-- **健康检查是唯一「code 恒 0、状态在 `data.status`」的接口** ⇒ 监控判 `data.status`；**在线**口径 `show_online=1 AND last_active_at > NOW()-300s`；★ 费率**线上=比率 0~1 / 界面=百分比带 `%`**，换算**只在 `api/settings.ts` 边界**；★ **游客面最危险的不是按钮，是「页面加载期的请求」**（加载期必须 `if (isLoggedIn)` 静默跳过）；★ 另一个**非业务观测端点 `GET /ai/providers`**（AI 链状态 `chain`/`available`/`missing`/`unknown`/`providers[]`，**只报 `keyConfigured`、绝不回显 key**）——「AI 没回复」先打它，别先翻 yml
+- `Result<T>={code,message,data}`；分页 `{list,total,page,pageSize}`（**非 `records`**）；码 `0/401/403/404/500/1001/1002`
+- ★ **登录是 `/user/login` 而非 `/auth/login`** —— 打错返回 `{"code":401,"message":"未登录"}`，**看起来像「密码错了」**
+- ★ **两种越权口径都刻意**：商品不可见 → **404**；**订单非买家 → 403 + 明确文案**。写断言别混用（必假红）
+- ★ 健康检查是唯一「code 恒 0、状态在 `data.status`」的接口；另有观测端点 **`GET /ai/providers`**（只报 `keyConfigured`）
 
-## 七、数据库初始化（→ L5）
+## 七、数据库初始化 → L5
 
-- `schema-auto.sql` **是生成物别手改**；**绝不能**配重建型 `schema.sql`；`data-locations` **整体覆盖不合并**；演示 profile = `demo` + `--app.demo.reset-confirmed=true`（**重置型，中途别重启**）；prod 首次建表手工跑 `db/schema.sql`、**不灌弱口令种子**；⚠️ 禁 `LIKE '2026%'` 清测试单（种子同前缀）⇒ 按主键删
+- `schema-auto.sql` **是生成物别手改**；**绝不能**配重建型 `schema.sql`；`data-locations` **整体覆盖不合并**；⚠️ 禁 `LIKE '2026%'` 清测试单
 
-## 八、构建 / 运行（→ L6 / A）
+## 八、构建 / 运行 → L6
 
-- ★★ 发版统一走 **`node campus-secondhand-backend/deploy/build-release.mjs`**（★ 不是根 `deploy/`，会 MODULE_NOT_FOUND；自钉 JDK 17；不过自检则退出码 2）；构建走 `.workbuddy/run-mvn.mjs`（`-s` 路径**正斜杠**）；启后端**必须显式 `--server.port=8080`** + **正本 jar**，★ 沙箱 Bash 结束会**杀子进程树** ⇒ `run_in_background` + 阻塞保活
-- ★★ **脚本/工具会撒谎**：shim bash 无 `mkdir` ⇒ `mkdir -p` **exit 127、后续根本没跑**（同批缺 `tail`/`head`/`dirname`/`cd`/**`cat`**/**`grep`**）；★ **`cat X 2>/dev/null || echo "(无 X)"` 会输出「自信的错误结论」** —— 本轮真把**存在**的 `.gitignore` 报成「无 .gitignore」（`2>/dev/null` 把「命令不存在」伪装成「文件不存在」）⇒ **别用 `|| echo` 兜底掩盖工具缺失**，工具缺失必须报出来；中文路径 `target/maven-status` 读不回 ⇒ **一条测试都没跑**；`run-mvn.mjs` **恒以 0 退出**（必回读日志正文找 `BUILD SUCCESS/FAILURE`）；★ **追加型文档脚本重复跑会静默产生重复节** ⇒ 跑完回读校验节序号连续；★ **`replace` 的 `to` 是替换模式**（`` $` ``⇒全文重复）⇒ 文档脚本一律 split/join → A；★★ **内联 `node -e "…"` 里的反引号会被 bash 抢先做命令替换**（双引号内的反引号＝命令替换）⇒ 生成含「代码块围栏／反引号」的文本时 JS 字符串被搅坏、**写出的文件只剩开头一段**（本轮真踩）⇒ **一律写成脚本文件跑**，别塞进内联 `-e`
-- ★★ **注入的会话时间可能严重滞后真实时钟**（本回合滞后约 7 小时）⇒ 判断「现在几点/订单是否过期/超时窗口还剩多久」一律走 `Get-Date` / `new Date()`，**别用注入时间**；★ 日志**按天滚动** ⇒ 跨零点的证据在被卷走的 `dist/logs/*.log.gz` 里（当前日志可能只剩几行）
-- ★★ **注释里的 cron 字面量会炸掉整个文件**：`/* … */` 块注释里写出「星号+斜杠」开头的表达式（如每 20 秒那种六段式），第 2、3 字符正好是 `*/` ⇒ **注释提前闭合 ⇒ 语法错误**（`start-backend-fastcron.mjs` 的注释专门警告过，仍踩了一次）⇒ 注释里一律改写描述（「每 20 秒一轮」），别写字面量
-- ★★ **要打真实回调入口做探针时，别改 `.env.local`**：把「验签锚」换成自己握有私钥的那把公钥，**只在启动器的子进程 env 里覆写**（磁盘文件一字不动）⇒ 不存在「忘了还原」这个状态；覆写生效要有**独立旁证**（如出站响应验签同时失败 ⇒ 对账转 `UNAVAILABLE`），不能靠「我觉得生效了」。一次性夹具用 `CREATE TABLE AS SELECT` 复制库行 → 改主键/状态 → `INSERT`，用完按主键删并复核真数据完好
+- ★★ 发版统一走 **`node campus-secondhand-backend/deploy/build-release.mjs`**（★ 不是根 `deploy/`，会 MODULE_NOT_FOUND）
+- ★★ 工具会撒谎：`run-mvn.mjs` **恒以 0 退出** ⇒ 必回读日志找 `BUILD SUCCESS/FAILURE`；内联 `node -e` 里的反引号会被 bash 抢先替换 ⇒ **写脚本文件跑**；**注入的会话时间可能滞后真实时钟** ⇒ 走 `Get-Date`/`new Date()`
+- ★★ **注释里的 cron 字面量会提前闭合块注释** ⇒ 注释里别写字面量
