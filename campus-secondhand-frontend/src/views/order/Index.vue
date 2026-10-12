@@ -639,16 +639,41 @@
           >
             <div class="cc-line">
               <span class="cc-label">{{ c.label }}</span>
-              <span
-                v-if="c.balance != null"
-                class="cc-balance"
-              >余额 ¥{{ Number(c.balance).toFixed(2) }}</span>
             </div>
             <div class="cc-hint">
               {{ c.hint }}
             </div>
           </el-radio>
         </el-radio-group>
+
+        <!--
+          钱包充值入口
+          ★ 为什么必须有这一条 ★
+          收银台的「校园钱包」文案写着「使用校园币余额直接支付，无需跳转」，
+          但改造前全站**没有任何充值入口** —— 后端没有充值接口、前端全树搜
+          「充值」零命中，只有 SQL 种子脚本能给余额加钱（还只覆盖三个演示账号）。
+          于是任何其它账号打开收银台都是「余额 ¥0.00」，点确认支付必弹
+          「钱包余额不足」，而用户翻遍页面也找不到地方加钱：看起来像功能坏了。
+          这条入口跟随钱包渠道一起出现，不做条件隐藏 —— 余额显示为 0 时，
+          它就是唯一的出路，正好是最不该把它藏起来的时刻。
+        -->
+        <div
+          v-if="walletChannel"
+          class="cashier-wallet-bar"
+        >
+          <span class="cwb-text">
+            校园钱包余额
+            <b class="cwb-amount">¥{{ walletBalanceText }}</b>
+          </span>
+          <el-button
+            text
+            type="primary"
+            size="small"
+            @click="rechargeVisible = true"
+          >
+            去充值
+          </el-button>
+        </div>
 
         <p
           v-if="!payChannels.length"
@@ -679,6 +704,18 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!--
+      充值弹窗放在收银台**外面**（同级，不是嵌套）
+      ★ 嵌套会让 z-index 打架 ★
+      el-dialog 的层级是递增分配的，嵌套时内层弹窗可能被外层遮罩盖住，
+      表现为「点了去充值，弹窗出来了但点不动」—— 这类问题只在真机上偶发，
+      同级摆放则完全不存在这个风险。
+    -->
+    <WalletRechargeDialog
+      v-model="rechargeVisible"
+      @success="onRechargeSuccess"
+    />
   </PageContainer>
 </template>
 
@@ -686,6 +723,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PageContainer from '@/components/common/PageContainer.vue'
+import WalletRechargeDialog from '@/components/business/WalletRechargeDialog.vue'
 import { fetchOrders, payOrder, confirmReceive, cancelOrder, applyRefund, APPLY_REFUNDABLE_STATUS } from '@/api/order'
 import { fetchPayChannels, fetchPayStatus } from '@/api/pay'
 import type { PayChannelOption } from '@/api/pay'
@@ -706,6 +744,38 @@ const payChannels = ref<PayChannelOption[]>([])
 const payChannelCode = ref('')
 const paying = ref(false)
 const launchMessage = ref('')
+
+/* ------------------------- 充值 ------------------------- */
+const rechargeVisible = ref(false)
+
+/**
+ * 钱包渠道（可能不存在：某个 profile 下它被关掉时列表里就没有它）。
+ * 用 computed 而不是存一个 ref：渠道列表会随「充值成功后刷新」而整体替换，
+ * 存快照会指向旧对象，余额显示就不会更新。
+ */
+const walletChannel = computed(() => payChannels.value.find((c) => c.code === 'wallet'))
+
+/** 收银台上显示的余额文案。渠道缺失或后端没给值时回 0.00，避免出现 "¥undefined" */
+const walletBalanceText = computed(() => {
+  const b = walletChannel.value?.balance
+  return b == null ? '0.00' : Number(b).toFixed(2)
+})
+
+/**
+ * 充值成功后刷新渠道列表。
+ * <p>
+ * ★ 必须重新拉，不能在本地说「余额 += 刚充的钱」★
+ * 本地累加用的是本地快照，一旦别处（另一台设备、另一个标签页）也动过余额，
+ * 算出来的就是错的；而且收银台这个数字会直接影响用户判断"够不够付这一单"。
+ * 多一次请求换取显示一定正确，这笔账划算。
+ */
+async function onRechargeSuccess() {
+  try {
+    payChannels.value = await fetchPayChannels()
+  } catch {
+    // 刷新失败不影响充值本身：钱已经入账，下次打开收银台自然会看到新余额
+  }
+}
 const pollTimer = ref<number | null>(null)
 
 const router = useRouter()
@@ -1154,8 +1224,23 @@ onMounted(async () => {
   border-radius: 8px; margin-right: 0;
   .cc-line { display: flex; align-items: center; gap: 8px; }
   .cc-label { font-weight: 600; }
-  .cc-balance { font-size: 12px; color: var(--el-color-warning); }
   .cc-hint { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px; line-height: 1.5; }
+}
+/* 钱包余额 + 充值入口。余额从渠道卡片里移到这里 —— 同一屏显示两遍同一个数字
+   既冗余又让人怀疑哪个才是准的，而且这里还能顺手给出「去哪加钱」这一个动作 */
+.cashier-wallet-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-color);
+
+  .cwb-text { font-size: 12px; color: var(--color-text-secondary); }
+  .cwb-amount { color: var(--color-primary); font-size: 14px; }
 }
 .cashier-empty, .cashier-tip { font-size: 12px; color: var(--el-text-color-secondary); margin: 10px 0 0; }
 

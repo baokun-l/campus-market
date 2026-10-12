@@ -45,6 +45,22 @@ public class WalletLog {
     /** 出账（支付） */
     public static final String TYPE_PAY = "pay";
 
+    /**
+     * 类型 → 中文名。
+     * <p>
+     * ★ 映射表放在这里，而不是前端再维护一份 ★
+     * 前端各写一份枚举映射的后果是：后端将来加一种类型（如 {@code adjust} 人工调账），
+     * 前端那一份不会跟着改，流水列表里就会出现一行字面量 {@code adjust}。
+     * 放在常量旁边，加类型时改一处即可；未识别的类型**原样返回**而不是显示"未知"，
+     * 这样新增类型即使忘了补映射，页面上也还能看出是什么。
+     */
+    public static String labelOf(String type) {
+        if (TYPE_RECHARGE.equals(type)) return "充值";
+        if (TYPE_REFUND.equals(type)) return "退款";
+        if (TYPE_PAY.equals(type)) return "支付";
+        return type;
+    }
+
     @TableId(type = IdType.AUTO)
     private Long id;
 

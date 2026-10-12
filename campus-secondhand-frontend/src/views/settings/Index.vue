@@ -42,6 +42,37 @@
       </el-icon>
     </section>
 
+    <!--
+      校园钱包
+      ★ 为什么设置页也要有一个充值入口 ★
+      收银台那个入口只在「用户正准备付款」时可见 —— 用户想先充点钱备用，
+      或者余额不足时退出来就找不到入口了。设置页是「管理我的账号」的地方，
+      余额属于账号属性，放在这里既符合直觉，也让充值有一个随时可达的入口。
+      两处共用同一个 WalletRechargeDialog 组件，行为完全一致。
+    -->
+    <SettingsGroup title="校园钱包">
+      <SettingsItem
+        icon="Wallet"
+        label="校园币余额"
+        hint="充值后可用于站内订单支付，余额与流水同时入账"
+        :show-chevron="false"
+      >
+        <template #action>
+          <span class="wallet-amount">
+            {{ walletLoading ? '—' : `¥${walletBalance.toFixed(2)}` }}
+          </span>
+          <el-button
+            text
+            type="primary"
+            size="small"
+            @click.stop="rechargeVisible = true"
+          >
+            去充值
+          </el-button>
+        </template>
+      </SettingsItem>
+    </SettingsGroup>
+
     <!-- 账号与安全 -->
     <SettingsGroup title="账号与安全">
       <SettingsItem
@@ -643,6 +674,12 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 校园币充值（与收银台共用同一个组件，行为一致） -->
+    <WalletRechargeDialog
+      v-model="rechargeVisible"
+      @success="onRechargeSuccess"
+    />
   </div>
 </template>
 
@@ -651,6 +688,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import SettingsGroup from '@/components/common/SettingsGroup.vue'
 import SettingsItem from '@/components/common/SettingsItem.vue'
+import WalletRechargeDialog from '@/components/business/WalletRechargeDialog.vue'
 import { useAppStore, ACCENTS, type FontSize, type Accent } from '@/stores/modules/app'
 import { useUserStore } from '@/stores/modules/user'
 import { useMessageStore } from '@/stores/modules/message'
@@ -658,6 +696,7 @@ import { useOnlineStore } from '@/stores/modules/online'
 import { releaseOverlayFocus } from '@/utils/focus'
 import { formatPrice } from '@/utils/format'
 import { changePassword, updatePrivacy } from '@/api/user'
+import { fetchWallet } from '@/api/wallet'
 
 const router = useRouter()
 const appStore = useAppStore()
@@ -1044,9 +1083,50 @@ function onDeleteAccount() {
     .catch(() => {/* cancel */})
 }
 
+/* ========== 校园钱包 ========== */
+const rechargeVisible = ref(false)
+const walletBalance = ref(0)
+const walletLoading = ref(false)
+
+/**
+ * 拉一次余额。
+ *
+ * ★ 抽成独立函数而不是写在 onMounted 里 ★
+ * 它有三个调用点：页面挂载、充值成功后、以及将来可能的「下拉刷新」。
+ * 写在 onMounted 里的话，充值成功后就没法复用，只能再抄一遍请求逻辑。
+ */
+async function loadWallet() {
+  walletLoading.value = true
+  try {
+    const w = await fetchWallet()
+    walletBalance.value = Number(w.balance) || 0
+  } catch {
+    /*
+     * 查余额失败**不要**弹错误提示，也不要让整页报错。
+     * 余额只是这一行展示，用户进设置页本来是想改字体、改隐私设置 ——
+     * 为了一个次要数字把整页打断，比显示一个占位符更糟。
+     * 失败时余额保持上一次的值（首次进入是 0.00），用户点「去充值」时
+     * 弹窗会自己再查一次，那时的失败才需要明确告知。
+     */
+    walletLoading.value = false
+    return
+  }
+  walletLoading.value = false
+}
+
+/**
+ * 充值成功。
+ * ★ 用服务端回传的余额刷新，不做本地累加 ★
+ * `WalletRechargeDialog` 的 success 事件带的就是服务端事务内查库得到的真实余额。
+ */
+function onRechargeSuccess(balance: number) {
+  walletBalance.value = balance
+}
+
 onMounted(() => {
   // 启动时同步字号到根节点
   document.documentElement.style.fontSize = appStore.fontSizePx + 'px'
+  loadWallet()
 })
 onUnmounted(() => {
   if (phoneTimer) { clearInterval(phoneTimer); phoneTimer = null }
@@ -1058,6 +1138,15 @@ onUnmounted(() => {
 
 /* 反馈弹窗：提示条与输入框之间留出间距，否则两块贴在一起像同一段文字 */
 .fb-input { margin-top: 12px; }
+
+/* 钱包余额：用主色 + 等宽数字，与右侧「去充值」拉开层级；
+   等宽（tnum）是为了让 ¥500.00 → ¥1200.00 变化时数字不会左右跳动 */
+.wallet-amount {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
+}
 
 .page-title {
   font-size: 22px;

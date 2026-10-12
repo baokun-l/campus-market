@@ -22,7 +22,12 @@ CREATE TABLE t_user (
     -- 每一次增减都配一条 t_wallet_log 流水 —— 余额是现状，流水是过程：
     -- 只有现状、没有过程，出了纠纷永远说不清钱是怎么来的。
     -- ★ 这一列对外只读 ★：实体上是 READ_ONLY，任何请求体都改不动它，
-    -- 只能由充值 / 支付 / 退款三条受控路径变更。
+    -- 只能由充值 / 支付 / 退款三条受控路径变更：
+    --   充值 → WalletService#recharge（入金）
+    --   支付 → WalletPayChannel#create（扣减）
+    --   退款 → WalletPayChannel#refund（原路退回）
+    -- （这三条在 09-xx 之前只有后两条存在，「充值」只是注释里的一句承诺，
+    --   所以任何非种子账号余额恒为 0、收银台点下去必然提示余额不足。）
     balance       DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '钱包余额（平台虚拟币，单位：元）',
     credit_score  INT          DEFAULT 100 COMMENT '信用分(0-100)',
     status        VARCHAR(20)  DEFAULT 'active' COMMENT '状态: active/banned/pending',
@@ -252,6 +257,18 @@ CREATE TABLE t_payment (
 -- balance_after 是刻意冗余的一列：它让「余额对不对」变成一次逐行比对 ——
 -- 每条流水的 balance_after 应当等于上一条的 balance_after 加本条 amount。
 -- 只存 amount 的话，对账得自己从头累加，且一旦中间有一条被误删就永远检查不出来。
+--
+-- ★ uk_wallet_type_biz：充值幂等（并发下的唯一仲裁者）★
+--   充值要防「用户连点两下 / 前端自动重试」造成重复入金。业务层的「先查后写」
+--   只能挡住**顺序**重放；两个真正并发的请求在业务层都查不到对方，都会加钱。
+--   判定必须发生在数据库内部（写入即校验，没有竞争窗口），所以落到唯一索引上。
+--
+--   为什么键是 (type, biz_id) 而不是只有 biz_id：
+--     支付与退款共用同一个支付单号作为 biz_id（type 分别是 pay / refund），
+--     单列唯一会直接把退款挡死。加上 type 之后，两类各自唯一、互不干扰。
+--   为什么它可以容忍 NULL：MySQL 的唯一索引允许多个 NULL。种子脚本灌入的
+--     「演示初始余额」流水 biz_id 就是 NULL，而且要能反复重灌（先清后建），
+--     所以这里绝不能写成 NOT NULL + 唯一。
 DROP TABLE IF EXISTS t_wallet_log;
 CREATE TABLE t_wallet_log (
     id            BIGINT        AUTO_INCREMENT PRIMARY KEY,
@@ -259,11 +276,13 @@ CREATE TABLE t_wallet_log (
     amount        DECIMAL(10,2) NOT NULL COMMENT '变动金额（正=入账 负=出账）',
     balance_after DECIMAL(10,2) NOT NULL COMMENT '变动后余额（对账用）',
     type          VARCHAR(20)   NOT NULL COMMENT '类型: recharge/pay/refund',
-    biz_id        VARCHAR(40)   COMMENT '关联业务号（支付单号或订单号）',
+    biz_id        VARCHAR(40)   COMMENT '关联业务号（支付单号 / 充值幂等键）',
     remark        VARCHAR(200)  COMMENT '说明',
     create_time   DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '发生时间',
     -- 取某人流水：WHERE user_id=? ORDER BY id DESC
-    KEY idx_wallet_log_user (user_id, id)
+    KEY idx_wallet_log_user (user_id, id),
+    -- 充值幂等：见上方注释。冲突 = 重复提交，由 WalletService 转成业务异常并回滚
+    UNIQUE KEY uk_wallet_type_biz (type, biz_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='钱包流水表';
 
 -- ==================== 私信消息表 ====================

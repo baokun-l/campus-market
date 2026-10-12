@@ -1,6 +1,6 @@
 /**
  * Element Plus 图标按需注册表
- * 由 scripts/scan-icons.mjs 扫描 src/ 生成，共 51 个（图标库共 293 个）。
+ * 由 scripts/scan-icons.mjs 扫描 src/ 生成，共 55 个（图标库共 293 个）。
  * 只注册项目真正用到的图标，避免全量引入带来的体积浪费。
  */
 import {
@@ -57,7 +57,8 @@ import {
   TrendCharts,
   User,
   UserFilled,
-  View
+  View,
+  Wallet
 } from '@element-plus/icons-vue'
 
 export const appIcons = {
@@ -114,5 +115,6 @@ export const appIcons = {
   TrendCharts,
   User,
   UserFilled,
-  View
+  View,
+  Wallet
 }

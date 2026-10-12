@@ -960,6 +960,25 @@ function buildReports(): Report[] {
 }
 let _reportsCache: Report[] = buildReports()
 
+/* ============ 假数据：校园钱包余额 ============ */
+/**
+ * mock 模式下的钱包余额。
+ *
+ * 初始值 500 与后端演示种子一致（zhangsan / lisi / wangwu 都是 500.00），
+ * 这样 mock 模式与真实模式看到的数字相同 —— 演示时切换模式不会出现
+ * 「同样一个账号，一边显示 500 一边显示 0」这种让人怀疑代码有问题的现象。
+ *
+ * ★ 只有 mock 模式会用这几个方法 ★
+ * 真实模式的余额一律以服务端为准（`GET /wallet`），前端不维护第二份数字：
+ * 一旦前端自己算余额，它就会与服务端不一致，而用户看到的是前端那一份。
+ */
+let _walletBalance = 500
+
+/** 金额归一到两位小数，与后端的 BigDecimal HALF_UP 口径对齐 */
+function round2(v: number): number {
+  return Math.round(v * 100) / 100
+}
+
 /* ============ 假数据：收货地址 ============ */
 let _addressesCache: Address[] = [
   { id: 1, receiver: '刘宝坤', phone: '13800138001', region: '北京市/海淀区/学院路街道', detail: 'XX大学南门 13 号宿舍楼 502', isDefault: true, tag: '宿舍' },
@@ -1716,6 +1735,11 @@ export const mockHelpers = {
   setReports: (r: Report[]) => (_reportsCache = r),
   getAddresses: () => _addressesCache,
   setAddresses: (a: Address[]) => (_addressesCache = a),
+  /* ---------- 校园钱包（mock 模式专用，见 _walletBalance 注释） ---------- */
+  getWalletBalance: () => _walletBalance,
+  setWalletBalance: (v: number) => (_walletBalance = round2(v)),
+  /** 充值：返回入账后的余额，调用方直接显示，不要自己再算一遍 */
+  addWalletBalance: (amount: number) => (_walletBalance = round2(_walletBalance + amount)),
   getSessions: () => _sessionsCache,
   setSessions: (s: ChatSession[]) => (_sessionsCache = s),
   getMessages: () => _messagesCache,

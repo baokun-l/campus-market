@@ -41,7 +41,10 @@ CREATE TABLE IF NOT EXISTS t_user (
     -- 每一次增减都配一条 t_wallet_log 流水 —— 余额是现状，流水是过程：
     -- 只有现状、没有过程，出了纠纷永远说不清钱是怎么来的。
     -- ★ 这一列对外只读 ★：实体上是 READ_ONLY，任何请求体都改不动它，
-    -- 只能由充值 / 支付 / 退款三条受控路径变更。
+    -- 只能由充值 / 支付 / 退款三条受控路径变更：
+    --   充值 → WalletService#recharge（入金）
+    --   支付 → WalletPayChannel#create（扣减）
+    --   退款 → WalletPayChannel#refund（原路退回）
     balance       DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '钱包余额（平台虚拟币，单位：元）',
     credit_score  INT          DEFAULT 100 COMMENT '信用分(0-100)',
     status        VARCHAR(20)  DEFAULT 'active' COMMENT '状态: active/banned/pending',
@@ -272,11 +275,18 @@ CREATE TABLE IF NOT EXISTS t_wallet_log (
     amount        DECIMAL(10,2) NOT NULL COMMENT '变动金额（正=入账 负=出账）',
     balance_after DECIMAL(10,2) NOT NULL COMMENT '变动后余额（对账用）',
     type          VARCHAR(20)   NOT NULL COMMENT '类型: recharge/pay/refund',
-    biz_id        VARCHAR(40)   COMMENT '关联业务号（支付单号或订单号）',
+    biz_id        VARCHAR(40)   COMMENT '关联业务号（支付单号 / 充值幂等键）',
     remark        VARCHAR(200)  COMMENT '说明',
     create_time   DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '发生时间',
     -- 取某人流水：WHERE user_id=? ORDER BY id DESC
-    KEY idx_wallet_log_user (user_id, id)
+    KEY idx_wallet_log_user (user_id, id),
+    -- ★ uk_wallet_type_biz：充值幂等 ★
+    -- 键是 (type, biz_id) 而不是只有 biz_id：支付与退款共用同一个支付单号作为
+    -- biz_id（type 分别是 pay / refund），单列唯一会直接把退款挡死。
+    -- 它容忍 NULL 是必要的：演示种子流水 biz_id 就是 NULL，且要能反复重灌。
+    -- ⚠️ 本文件全是 CREATE TABLE IF NOT EXISTS，对**已存在**的表整条跳过 ⇒
+    --    它建得出新表，但给旧表补不了这个索引。老库请跑 db/upgrade-wallet-recharge.sql。
+    UNIQUE KEY uk_wallet_type_biz (type, biz_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='钱包流水表';
 
 -- ==================== 私信消息表 ====================
