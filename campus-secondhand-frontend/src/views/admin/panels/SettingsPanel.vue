@@ -44,10 +44,21 @@
             </template>
             <p class="set-note-line">
               全部 8 项都能真实写入数据库；但按当前后端实现，
-              <b>只有「每日发布上限」被业务流程读取</b>。
+              <b>只有「每日发布上限」与「自动下架天数」被业务流程读取</b>。
               标着「未启用」的项改动会保存下来，但不会改变系统行为 ——
               它们缺的是「谁来读」，不是「存不下来」。
             </p>
+            <!--
+              ★ 这条 alert 自己就是一次「说明与实现不一致」的事故现场 ★
+              它原先写的是「**只有**『每日发布上限』被业务流程读取」——
+              而那句话是自动下架还没有定时任务时写的。后来补了 `GoodsOfflineJob`，
+              上面那张 WIRED 表跟着改了，这句正文却没人动，
+              于是在整整一段时间里：同一块屏幕上，
+              标签说「已生效」，标题下的正文说「只有每日发布上限被读取」，两句互相矛盾。
+              教训：把「据实标注」做成一张表还不够 ——
+              凡是重复描述同一事实的地方（表 + 正文），都会各自漂移。
+              这里保留这条注释，是为了下次再改可读项时能一眼看到第二处。
+            -->
           </el-alert>
 
           <el-form
@@ -137,33 +148,74 @@
               </el-form-item>
             </div>
 
-            <div class="adm-form-row">
-              <el-form-item label="自动下架天数">
-                <el-input-number
-                  v-model="form.autoOfflineDays"
-                  :min="0"
-                  :max="365"
-                  controls-position="right"
-                />
-                <el-tag
-                  v-bind="wiredTag('autoOfflineDays')"
-                  class="wired-tag"
+            <!--
+              ★ 为什么这一项独占一行、还多两个按钮 ★
+              它是 8 项参数里唯一会**批量改业务数据**的配置项：到点之后，
+              凌晨那一次定时任务会把成批商品置为「已下架」，没有撤销键，卖家也收不到预警。
+              其余 7 项改错了最多是白改；这一项改错了要卖家自己去恢复上架。
+              旁边那个「已生效」标签只说明「后端确实有人读它」，**不说明会不会误伤** ——
+              所以必须把「会动多少件」摆在按下去之前。
+            -->
+            <el-form-item label="自动下架天数">
+              <el-input-number
+                v-model="form.autoOfflineDays"
+                :min="0"
+                :max="365"
+                controls-position="right"
+              />
+              <el-tag
+                v-bind="wiredTag('autoOfflineDays')"
+                class="wired-tag"
+              >
+                {{ WIRED_LABEL[WIRED.autoOfflineDays] }}
+              </el-tag>
+              <span class="adm-card-hint inline-tip">每天凌晨 03:30 定时执行；0 表示不自动下架</span>
+
+              <div class="auto-offline-ops">
+                <el-button
+                  size="small"
+                  :loading="previewingOffline"
+                  @click="onPreviewAutoOffline"
                 >
-                  {{ WIRED_LABEL[WIRED.autoOfflineDays] }}
-                </el-tag>
-                <span class="adm-card-hint inline-tip">尚无定时任务执行下架</span>
-              </el-form-item>
-              <el-form-item label="举报自动隐藏">
-                <el-switch v-model="form.reportAutoHide" />
-                <el-tag
-                  v-bind="wiredTag('reportAutoHide')"
-                  class="wired-tag"
+                  预览影响范围
+                </el-button>
+                <el-button
+                  size="small"
+                  type="warning"
+                  plain
+                  :loading="runningOffline"
+                  @click="onRunAutoOffline"
                 >
-                  {{ WIRED_LABEL[WIRED.reportAutoHide] }}
-                </el-tag>
-                <span class="adm-card-hint inline-tip">举报仍由人工处理</span>
-              </el-form-item>
-            </div>
+                  立即执行一次
+                </el-button>
+                <span
+                  v-if="autoOfflineDaysDirty"
+                  class="auto-offline-dirty"
+                >
+                  改了天数但还没保存：两个按钮都按「已保存的 {{ saved.autoOfflineDays }} 天」执行
+                </span>
+              </div>
+
+              <el-alert
+                v-if="offlineText"
+                :title="offlineText"
+                :type="offlineTextType"
+                :closable="false"
+                show-icon
+                class="auto-offline-result"
+              />
+            </el-form-item>
+
+            <el-form-item label="举报自动隐藏">
+              <el-switch v-model="form.reportAutoHide" />
+              <el-tag
+                v-bind="wiredTag('reportAutoHide')"
+                class="wired-tag"
+              >
+                {{ WIRED_LABEL[WIRED.reportAutoHide] }}
+              </el-tag>
+              <span class="adm-card-hint inline-tip">举报仍由人工处理</span>
+            </el-form-item>
 
             <el-divider content-position="left">
               平台计费
@@ -383,8 +435,15 @@ import { computed, inject, onActivated, onUnmounted, ref } from 'vue'
 import { Download } from '@element-plus/icons-vue'
 import { AUDIT_ACTION_TYPES, fetchAuditLogs, fetchAuditLogsForExport, clearAuditLogs, auditTypeOf } from '@/api/audit'
 import type { AuditLog } from '@/api/audit'
-import { fetchSettings, resetSettings, saveSettings, SETTINGS_LABEL } from '@/api/settings'
-import type { PlatformSettings } from '@/api/settings'
+import {
+  fetchSettings,
+  resetSettings,
+  saveSettings,
+  previewAutoOffline,
+  runAutoOffline,
+  SETTINGS_LABEL
+} from '@/api/settings'
+import type { AutoOfflineResult, PlatformSettings } from '@/api/settings'
 import { fetchGoods, GOODS_STATUS_LABEL } from '@/api/goods'
 import { fetchAdminOrders, ORDER_STATUS_LABEL } from '@/api/order'
 import { fetchUsers } from '@/api/user'
@@ -429,6 +488,64 @@ const dirtyKeys = computed(() =>
     .map((k) => SETTINGS_LABEL[k])
 )
 
+/* ============================================================
+ * 自动下架：预览 / 立即执行
+ * ============================================================
+ * ★ 为什么这一项要有独立的按钮，别的 7 项没有 ★
+ * 其余 7 项「改了没效果」最多是白改；这一项不一样 ——
+ * 它每天凌晨 03:30 会真的把成批商品置为「已下架」，而且**没有撤销键**。
+ * 也就是说，管理员是在「看不见后果」的情况下按下一个会改真实数据的开关。
+ *
+ * 后端 `GET|POST /admin/goods/auto-offline` 提供「只数不改」的预览与手工执行，
+ * 前端此前零调用方 ⇒ 这个配置在界面上根本无法被验证，
+ * 唯一的确认方式是等第二天凌晨去看商品少了没有。
+ */
+
+const previewingOffline = ref(false)
+const runningOffline = ref(false)
+
+/** 最近一次预览 / 执行的结果；`kind` 决定文案用「将下架」还是「已下架」 */
+type OfflineOutcome = AutoOfflineResult & { kind: 'preview' | 'run' }
+const offlineOutcome = ref<OfflineOutcome | null>(null)
+
+/**
+ * 表单里的天数与已保存值是否不一致。
+ *
+ * ★ 这个 computed 不是为了「提示未保存」，而是为了不让预览按钮撒谎 ★
+ * 预览接口读的是数据库里的值。管理员把 90 改成 30、没保存就点预览，
+ * 拿到的是按 90 算出来的结果 —— 界面上却摆着一个 30。
+ * 不把这件事说出来，这个「安全按钮」本身就会误导人，
+ * 而它存在的全部意义恰恰是防止误伤。
+ */
+const autoOfflineDaysDirty = computed(
+  () => form.value.autoOfflineDays !== saved.value.autoOfflineDays
+)
+
+/** 结果文案：0 的两义性（配置关闭 / 没有超期商品）必须分开说 */
+const offlineText = computed(() => {
+  const r = offlineOutcome.value
+  if (!r) return ''
+  if (r.days <= 0) {
+    // days = 0 是「功能被关掉」，不是「没有超期商品」—— 两者都返 0，必须由文案区分
+    return '当前「自动下架天数」为 0，该功能已关闭：不做任何下架，预览与执行都会是 0 件。'
+  }
+  if (r.kind === 'preview') {
+    return r.count > 0
+      ? `按已保存的「${r.days} 天」配置，现有 ${r.count} 件在售商品会被下架。`
+      : `按已保存的「${r.days} 天」配置，没有超期商品（将下架 0 件），执行不会误伤。`
+  }
+  return r.count > 0
+    ? `已按「${r.days} 天」执行：下架 ${r.count} 件商品。`
+    : `已按「${r.days} 天」执行：没有超期商品，下架 0 件。`
+})
+
+/** el-alert 的 type 必须收窄到字面量联合，否则 vue-tsc 过不了 */
+const offlineTextType = computed<'info' | 'success' | 'warning'>(() => {
+  const r = offlineOutcome.value
+  if (!r || r.days <= 0) return 'info'
+  return r.count > 0 ? 'warning' : 'success'
+})
+
 /*
  * ============================================================
  * 每个配置项「是否有真实的业务读取方」—— 据实标注
@@ -455,8 +572,16 @@ const WIRED: Record<keyof PlatformSettings, 'live' | 'estimate' | 'idle'> = {
   goodsAuditRequired: 'idle',
   // ★ 唯一真生效项：GoodsService.publishGoods 发布前按它拦人
   maxPublishPerDay: 'live',
-  // 没有定时任务，天数是空转的
-  autoOfflineDays: 'idle',
+  // ★ 2026-10-12 更正：这一项**是生效的**，原标 'idle' 已过时 ★
+  // 后端 GoodsOfflineJob 上挂着
+  //   @Scheduled(cron = "${app.goods-maintenance.offline-cron:0 30 3 * * ?}")
+  // 默认每天凌晨 03:30 执行，链路是
+  //   GoodsOfflineJob → GoodsMaintenanceService.offlineStaleGoods() → AnalyticsService.autoOfflineDays()
+  // 读的就是这一列（0 / NULL = 不自动下架）。
+  // 标 'idle' 的那句话写于「还没有定时任务」的年代，后来补了 Job，这里却没人同步 ——
+  // 于是界面告诉管理员「未启用」，实际它每天都在跑：预期与实际**正好相反**，
+  // 比「功能没做」更危险。补消费方时必须同步改这张表，这条纪律就写在这里。
+  autoOfflineDays: 'live',
   // 举报阈值逻辑未实现，仍由人工处理
   reportAutoHide: 'idle',
   commissionRate: 'estimate'
@@ -508,6 +633,9 @@ async function onSave() {
     const next = await saveSettings({ ...form.value, siteName: form.value.siteName.trim() })
     form.value = { ...next }
     saved.value = { ...next }
+    // 配置可能已经变了 ⇒ 上一次预览/执行的结论已失效，先清掉，
+    // 免得管理员看着旧结论去做新一次决定（旧的「0 件」不代表新的天数也是 0 件）
+    offlineOutcome.value = null
     ElMessage.success('设置已保存')
   } finally {
     saving.value = false
@@ -523,7 +651,82 @@ async function onReset() {
   const next = await resetSettings()
   form.value = { ...next }
   saved.value = { ...next }
+  offlineOutcome.value = null
   ElMessage.success('已恢复默认参数')
+}
+
+/* ============================================================
+ * 自动下架：预览（只读）与立即执行（批量改数据）
+ * ============================================================ */
+
+async function onPreviewAutoOffline() {
+  previewingOffline.value = true
+  try {
+    const r = await previewAutoOffline()
+    offlineOutcome.value = { kind: 'preview', ...r }
+    /*
+     * ★ 这一句提示不是「贴心」，是必需 ★
+     * 预览读的是**数据库里已保存**的天数。管理员把 90 改成 30、没保存就点预览，
+     * 拿到的是按 90 算的结果 —— 而屏幕上摆着的数字是 30。
+     * 不点破，他就会把「按 90 算出来 0 件」当成「按 30 也是 0 件」，
+     * 而这个按钮存在的意义恰恰是让他别误判。
+     */
+    if (autoOfflineDaysDirty.value) {
+      ElMessage.warning(
+        `预览读的是已保存的 ${r.days} 天；你刚改成 ${form.value.autoOfflineDays} 天，先「保存设置」再预览才是新配置的结果`
+      )
+    }
+  } finally {
+    previewingOffline.value = false
+  }
+}
+
+async function onRunAutoOffline() {
+  /*
+   * ★ 二次确认里必须写出「要动多少件」★
+   * 只问「确认执行自动下架吗」等于没给任何信息 —— 管理员无从判断这个「确认」
+   * 是不是在赌。所以先跑一次**只读**预览拿到件数，再把它写进确认框。
+   * 预览失败时直接取消执行：在不知道后果的情况下批量改数据，是这里最不该做的事。
+   */
+  let preview: AutoOfflineResult
+  try {
+    preview = await previewAutoOffline()
+  } catch {
+    ElMessage.error('无法预览影响范围，已取消执行（不确定后果时不批量改商品状态）')
+    return
+  }
+
+  const scope =
+    preview.days <= 0
+      ? '当前「自动下架天数」为 0（该功能已关闭），执行不会下架任何商品。'
+      : `将把 ${preview.count} 件发布超过 ${preview.days} 天、且仍在售的商品置为「已下架」。`
+
+  if (autoOfflineDaysDirty.value) {
+    ElMessage.warning(
+      `执行用的是已保存的 ${preview.days} 天，不是你刚改的 ${form.value.autoOfflineDays} 天`
+    )
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `${scope} 该操作会批量修改商品状态且无法一键撤销，卖家也不会收到预警，确定继续？`,
+      '执行自动下架',
+      { type: 'warning', confirmButtonText: '确认执行', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+
+  runningOffline.value = true
+  try {
+    const r = await runAutoOffline()
+    offlineOutcome.value = { kind: 'run', ...r }
+    ElMessage.success(r.count > 0 ? `已下架 ${r.count} 件商品` : '执行完成：没有超期商品')
+    // 商品状态变了 ⇒ 看板上的在售数、商品列表的数字都过时了，让外壳重拉一次
+    admin?.refreshOverview()
+  } finally {
+    runningOffline.value = false
+  }
 }
 
 /* ============================================================
@@ -777,6 +980,31 @@ onActivated(loadSettings)
 .dirty {
   margin-left: 12px;
   color: #d97706;
+}
+
+/* 自动下架的操作区：必须独占一行。
+   `el-form-item__content` 本身是 `display:flex; flex-wrap:wrap`，
+   所以 `flex-basis:100%` 就能把它挤到下一行；不写这句会跟输入框挤在一行被压扁。 */
+.auto-offline-ops {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+/* 「天数已改但未保存」：用警示色 —— 此刻屏幕上显示的天数与两个按钮的实际口径不一致 */
+.auto-offline-dirty {
+  font-size: $fs-12;
+  color: #d97706;
+  line-height: 1.6;
+}
+
+/* 预览 / 执行结果：也独占一行，紧贴操作区，避免跟上面的控件混读 */
+.auto-offline-result {
+  flex-basis: 100%;
+  margin-top: 8px;
 }
 
 /* el-divider 作为分组标题：只在左侧留字，右侧不加粗线 */

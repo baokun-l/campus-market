@@ -121,6 +121,27 @@
     </sql>
 
     <!--
+      管理端排序：列表与导出**必须共用这一段**。
+
+      之前导出的 ORDER BY 是硬编码的 `create_time DESC`，与列表的 choose 各写一份。
+      于是管理员在列表上选「金额降序」再点「导出当前筛选」，拿到的 CSV
+      顺序与屏幕上看到的完全不同 —— 数据一条没少，但「所见非所得」，
+      对账时很容易被当成导错了。
+
+      抽成片段而不是各写一遍：让「两处口径一致」由**结构**保证，
+      而不是指望下次改动时有人记得同步。以后再加排序方式只改这一处。
+    -->
+    <sql id="adminOrderBy">
+        ORDER BY
+        <choose>
+            <when test="query.sort == 'time_asc'">create_time ASC</when>
+            <when test="query.sort == 'amount_desc'">amount DESC</when>
+            <when test="query.sort == 'amount_asc'">amount ASC</when>
+            <otherwise>create_time DESC</otherwise>
+        </choose>
+    </sql>
+
+    <!--
       「买 / 卖家我的订单」——★ 默认必须收敛到「我参与的」★
 
       原来只在 role 显式等于 buyer / seller 时才加过滤条件，
@@ -162,27 +183,33 @@
     <select id="selectAdminOrders" resultMap="orderMap">
         SELECT * FROM t_order WHERE 1=1
         <include refid="adminFilter"/>
-        ORDER BY
-        <choose>
-            <when test="query.sort == 'time_asc'">create_time ASC</when>
-            <when test="query.sort == 'amount_desc'">amount DESC</when>
-            <when test="query.sort == 'amount_asc'">amount ASC</when>
-            <otherwise>create_time DESC</otherwise>
-        </choose>
+        <include refid="adminOrderBy"/>
     </select>
 
     <!--
-      导出：与列表共用 adminFilter，但**必须自带 LIMIT**。
+      导出：与列表共用 adminFilter（筛选）与 adminOrderBy（排序），但**必须自带 LIMIT**。
       这条查询不带 IPage 参数，因此不会经过分页拦截器，
       MybatisPlusConfig 的 setMaxLimit(500) 对它无效 ——
       少了 LIMIT 就是一次全表读取（订单量上万时整表进内存）。
       pageSize 由 OrderService.fetchAdminOrdersForExport 钳制到 [1, 5000] 后必然存在。
+
+      ★★ 必须写成 #{query.pageSize}，不能写成 #{pageSize} ★★
+      本语句对应的接口签名是
+        List<Order> selectAdminOrdersForExport(@Param("query") Map<String,Object> query);
+      只要方法参数上出现 @Param，MyBatis 就把整个参数列表「命名」，
+      可用名只剩 [query, param1] —— 写 #{pageSize} 会抛
+        BindingException: Parameter 'pageSize' not found.
+        Available parameters are [query, param1]
+      该异常抛在 BaseExecutor.createCacheKey（计算缓存 key 时），比 SQL 解析还早，
+      再由 GlobalExceptionHandler 兜底脱敏成「服务器内部错误，请稍后再试」——
+      管理员点「导出当前筛选」只会看到一个与真实原因完全无关的 500。
+      adminFilter 里的每一处引用也都是 query.xxx，本段与之保持一致。
     -->
     <select id="selectAdminOrdersForExport" resultMap="orderMap">
         SELECT * FROM t_order WHERE 1=1
         <include refid="adminFilter"/>
-        ORDER BY create_time DESC
-        LIMIT #{pageSize}
+        <include refid="adminOrderBy"/>
+        LIMIT #{query.pageSize}
     </select>
 
     <!--
