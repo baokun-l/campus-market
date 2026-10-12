@@ -19,12 +19,17 @@ const ROOT =
 const T2 = join(ROOT, '实践任务2：Web前端开发(Vue3+Element Plus+ECharts)', 'campus-secondhand-frontend')
 const T3 = join(ROOT, '实践任务3：后端开发(前后端分离)', 'campus-secondhand-frontend')
 
-/** 递归收集目录下所有文件的绝对路径 */
+/** 递归收集目录下所有文件的绝对路径（噪声目录下探前先剪掉，见 sync-front.mjs 同款注释） */
+const PRUNE_DIRS = ['node_modules', 'dist', 'dist-deploy', 'dist-opt', '.workbuddy', '.idea', '.vite', 'coverage']
+const shouldPrune = (name) => PRUNE_DIRS.includes(name) || name.startsWith('_旧dist-')
+
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name)
-    if (statSync(full).isDirectory()) walk(full, out)
-    else out.push(full)
+    if (statSync(full).isDirectory()) {
+      if (shouldPrune(name)) continue
+      walk(full, out)
+    } else out.push(full)
   }
   return out
 }
@@ -49,7 +54,30 @@ const IGNORE = [
   /^\.vite\//,
   /vitest\.config\.ts\.timestamp-.*\.mjs$/,
   /^\.eslintcache$/,
-  /^tsconfig\.tsbuildinfo$/
+  /^tsconfig\.tsbuildinfo$/,
+  /*
+   * ★ 2026-10-12 补：本地构建备份目录 `_旧dist-<日期>-勿部署/` ★
+   * 它是人手备份下来的旧 dist（目录名自己就写着「勿部署」），里面有 100+ 个哈希文件。
+   * 没排除它之前，`--dry` 会报「仅 T3 有 111 个文件」，其中 104 个是这个备份目录 ——
+   * 真正需要同步的只有 7 个。噪音比 15:1 时没有人会认真看那份清单，
+   * 于是真差异也就一起被忽略了。清单的作用是让差异**可读**，不是让差异更多。
+   */
+  /^_旧dist-/,
+  /*
+   * ★ 2026-10-12 再补：`dist-deploy/` ★
+   * 上面排除了 `dist/`，但受限执行环境里 vite 的清空动作会被安全护栏拦下
+   * （[SAFE_DELETE_BULK_CONFIRM_REQUIRED]，要删的文件数超阈值），
+   * 于是发版构建改用 `vite build --outDir dist-deploy` 输出到全新目录 ——
+   * 结果就是**多出一个 dist 的等价物**，而 `dist/` 那条规则盖不住它。
+   * 症状与上一次同型：`--dry` 报 107 处差异，全是这个目录，真差异被淹没。
+   * ★ 规则按目录名穷举就总有漏的；但这两处的判据同源（都是「构建产物」），
+   *   所以两条规则也必须放在一起改 —— 与 PRUNE_DIRS 保持同源。
+   */
+  /^dist-deploy\//,
+  // 覆盖率产物（vitest --coverage 的 HTML 报告），与 dist 同类
+  /^coverage\//,
+  // `npm run test:audit` 的口径报告：本机运行产物，只对生成它的那一次运行有意义
+  /^\.vitest-report\.json$/
 ]
 const isNoise = (k) => IGNORE.some((re) => re.test(k))
 

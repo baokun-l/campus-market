@@ -65,6 +65,22 @@ function sh(cmd, args, opts = {}) {
  */
 function javaMajor(javaExe) {
     const r = spawnSync(`"${javaExe}"`, ['-version'], { encoding: 'utf8', shell: true });
+    /*
+     * ★★ 必须先看 r.error，不能只看输出 ★★
+     * 实测（2026-09-26）：在受限执行环境里 spawnSync 会直接失败（`EBUSY`），
+     * 此时 stdout / stderr **都是空的**，status / signal 都是 null。
+     * 漏掉这一步的后果不是"报个错"这么轻 —— 它会把
+     *   「java 进程压根没起来」
+     * 显示成
+     *   「java ?（本项目要求 17）」
+     * 于是排错方向被引到"JDK 版本装错了"，而真正的原因是进程创建被拦。
+     * （这正是本仓 `[MEMORY] 工具会撒谎` 那一族：**判据要锚在真实原因上**。）
+     */
+    if (r.error) {
+        log(`  [警告] 无法执行 ${javaExe}：${r.error.code || r.error.message}` +
+            `  ← 这不是版本问题，是**进程没能启动**（受限环境/安全策略可能拦截子进程）`);
+        return null;
+    }
     const t = (r.stderr || '') + (r.stdout || '');
     const m = t.match(/version "(\d+)/);
     return m ? Number(m[1]) : null;
@@ -91,7 +107,9 @@ for (const c of candidates) {
 }
 if (!javaHome) {
     die('找不到 JDK 17。构建必须钉在一个干净的 17 上，否则产物会随开发机变化。\n' +
-        '        请设置 JDK17_HOME，或传 --java-home=<path>。');
+        '        请设置 JDK17_HOME，或传 --java-home=<path>。\n' +
+        '        注意：若上面出现了「无法执行 …」的警告，那说明不是版本问题，而是**子进程被拦截**；\n' +
+        '        此时换 --java-home 也没用，需要在允许创建子进程的终端里跑本脚本。');
 }
 
 log('== 发版构建 ==');

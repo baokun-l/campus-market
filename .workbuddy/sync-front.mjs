@@ -54,7 +54,16 @@ const IGNORE = [
   /^\.vite\//,
   /vitest\.config\.ts\.timestamp-.*\.mjs$/,
   /^\.eslintcache$/,
-  /^tsconfig\.tsbuildinfo$/
+  /^tsconfig\.tsbuildinfo$/,
+  // ★ 2026-10-12 补：本地构建备份目录，与 sync-check.mjs 保持同源（见那边的注释）★
+  /^_旧dist-/,
+  // ★ 2026-10-12 再补：`dist-deploy/`（受限环境下 vite 的替代输出目录）。
+  //   与 sync-check.mjs 必须同源 —— 否则会出现「check 说有 107 处差异、
+  //   sync 说已同步」，而人只会相信更乐观的那个。
+  /^dist-deploy\//,
+  /^coverage\//,
+  // `npm run test:audit` 的口径报告：本机运行产物（与 sync-check.mjs 同源）
+  /^\.vitest-report\.json$/
 ];
 const isNoise = (k) => IGNORE.some((re) => re.test(k));
 
@@ -85,11 +94,23 @@ const only = onlyArg
   : [];
 
 /* ---------- 遍历 ---------- */
+/*
+ * ★ 下探前先剪掉噪音目录 ★
+ * 原来是无条件递归：`node_modules`（几万条）与 `_旧dist-*`（上百条）都会被 stat 一遍
+ * 再被 IGNORE 全部丢弃。代价是 `sync-check.mjs` 在 120 秒内跑不完、被超时杀掉 ——
+ * 而现象是「命令没有输出」，很容易被读成「脚本坏了」甚至「没有差异」。
+ * 这些目录下的文件本就会被 IGNORE 全量过滤，提前剪枝不改变任何判定结果。
+ */
+const PRUNE_DIRS = ['node_modules', 'dist', 'dist-deploy', 'dist-opt', '.workbuddy', '.idea', '.vite', 'coverage'];
+const shouldPrune = (name) => PRUNE_DIRS.includes(name) || name.startsWith('_旧dist-');
+
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
-    if (statSync(full).isDirectory()) walk(full, out);
-    else out.push(full);
+    if (statSync(full).isDirectory()) {
+      if (shouldPrune(name)) continue;
+      walk(full, out);
+    } else out.push(full);
   }
   return out;
 }
