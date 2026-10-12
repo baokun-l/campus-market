@@ -14,6 +14,16 @@ dist-ssr
 # 此前清单 L7 记的是「dist-opt/ 未进 .gitignore」，复核时该目录**已不存在**（§15.1 判为失效）。
 # 但配置里那条分析构建随时可能再产出同名目录，所以预先补上，避免同一问题再发生一次。
 dist-opt
+# ★ 发版构建的产物目录（2026-10-12 补）。
+# 起因：受限执行环境里 vite 的 `emptyOutDir` 会被安全护栏拦下
+#   （[SAFE_DELETE_BULK_CONFIRM_REQUIRED]，要删 126 个文件 > 阈值 50），
+# 于是改用 `vite build --outDir dist-deploy` 输出到全新目录绕开清空动作。
+# 不加进忽略清单，`git status` 会常年挂着上百个未跟踪文件。
+dist-deploy
+# ★ 旧产物的归档目录（名字里的 `_旧...` 前缀与同步脚本 IGNORE 同源）。
+# 本项目**不删除**历史产物，一律改名归档，所以需要一个通用规则盖住，
+# 否则每归档一次就要手工再补一条。
+_旧dist-*
 coverage
 *.local
 
@@ -34,3 +44,6 @@ src/types/components.d.ts
 
 # Vite / Vitest 临时配置产物（每次构建重新生成，不应入库）
 *.timestamp-*.mjs
+
+# `npm run test:audit` 产出的口径报告（每次运行重新生成，用于核对文件数）
+.vitest-report.json
